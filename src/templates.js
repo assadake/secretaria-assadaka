@@ -69,9 +69,10 @@ function diffYM(fromISO, toISOstr){
    الفئات
    ============================================================ */
 const CATS = [
-  {id:'cert', name:'الشهادات', icon:'🎓', color:'blue'},
-  {id:'hr',   name:'الموارد البشرية والإدارية', icon:'🗂️', color:'gold'},
-  {id:'ext',  name:'المراسلات الخارجية والنماذج الحرة', icon:'✉️', color:'green'},
+  {id:'cert',  name:'الشهادات', icon:'🎓', color:'blue'},
+  {id:'hr',    name:'الموارد البشرية والإدارية', icon:'🗂️', color:'gold'},
+  {id:'ext',   name:'المراسلات الخارجية والنماذج الحرة', icon:'✉️', color:'green'},
+  {id:'group', name:'وثائق وتعميمات المجموعة المشتركة (AIS • الأبطال)', icon:'🏢', color:'red'},
 ];
 
 /* حقول الموظف المشتركة */
@@ -290,6 +291,122 @@ const TEMPLATES = [
     const lines = String(v.body||'').split('\n');
     return lines.map(l=> l.trim()? `<p class="indent">${esc(l)}</p>` : '<p>&nbsp;</p>').join('');
   },
+},
+
+/* ---------- 10) تعميم / قرار مشترك للمجموعة (AIS + الأبطال) ---------- */
+{
+  id:'group_circular', cat:'group', icon:'📢', code:'GRP', name:'تعميم / قرار مشترك للمجموعة',
+  desc:'قرار أو تعميم موحّد يسري على شركات المجموعة بشعاري AIS والأبطال',
+  dualLogo:true,
+  personKey:'scope',
+  fields:[
+    {k:'docKind', type:'select', label:'نوع الإصدار', options:['تعميم إداري مشترك','قرار مجلس إدارة المجموعة','تعليمات تنظيمية موحّدة','مذكرة تنسيقية بين الشركات']},
+    {k:'scope', label:'الشركات والإدارات المعنية', req:true, ph:'مثال: كافة شركات وفروع المجموعة والمصنع'},
+    {k:'subject', label:'الموضوع', req:true, span:2, ph:'مثال: تنظيم إجراءات استلام المركبات ومتابعة الوثائق الدورية'},
+    {k:'body', type:'textarea', label:'نص القرار / التعميم (كل بند في سطر)', req:true, span:2, rows:7},
+    {k:'effectiveDate', type:'date', label:'يُعمل به اعتباراً من'},
+    {k:'date', type:'date', label:'تاريخ الإصدار'},
+  ],
+  noTo:true,
+  head: (v) => `
+    <div class="l-to">
+      <div><b>نوع الوثيقة:</b> ${esc(v.docKind || 'تعميم إداري مشترك')}</div>
+      <div><b>الجهات المعنية:</b> ${esc(v.scope || 'كافة شركات وإدارات المجموعة')}</div>
+    </div>`,
+  subject: (v) => v.subject || (v.docKind || 'تعميم إداري مشترك'),
+  body: (v) => {
+    const lines = String(v.body||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    const listHTML = lines.length > 1
+      ? `<ol class="l-list">${lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ol>`
+      : `<p class="indent">${esc(lines[0]||'.............................')}</p>`;
+    return `
+      <p>في إطار تنظيم العمل المشترك وتوحيد الإجراءات الإدارية بين شركات <b>مجموعة الصداقة المثالية</b>، تقرّر ما يلي:</p>
+      ${listHTML}
+      ${v.effectiveDate ? `<p>يُعمل بمضمون هذا الإصدار اعتباراً من تاريخ <b>${fdate(v.effectiveDate)}</b>، وعلى كافة الإدارات والأقسام المعنية بشركات المجموعة وضعه موضع التنفيذ.</p>` : `<p>يُعمَّم هذا الإصدار على كافة الإدارات والأقسام المعنية للعمل بموجبه اعتباراً من تاريخ صدوره.</p>`}`;
+  },
+  closing: () => 'والله وليّ التوفيق،،،',
+},
+
+/* ---------- 11) محضر تسليم واستلام مركبة (عهدة سيارة) ---------- */
+{
+  id:'handover_vehicle', cat:'group', icon:'🚗', code:'CAR', name:'محضر تسليم واستلام مركبة',
+  desc:'تسليم عهدة سيارة لموظف أو فرع مع إثبات تواريخ التأمين والفحص والبل',
+  dualLogo:true,
+  personKey:'holder',
+  fields:[
+    {k:'holder', label:'اسم المستلم / الجهة المستلمة', req:true, ph:'مثال: الحاج علي صليل'},
+    {k:'nationalId', label:'الرقم الوطني / الوظيفي (اختياري)'},
+    {k:'vehicle', label:'نوع السيارة ولونها', req:true, ph:'مثال: تويوتا تكوما'},
+    {k:'plate', label:'رقم اللوحة', req:true, ph:'مثال: 5-506777'},
+    {k:'insurance', type:'date', label:'صلاحية التأمين'},
+    {k:'inspection', type:'date', label:'صلاحية الفحص الفني'},
+    {k:'vignette', type:'date', label:'صلاحية البل'},
+    {k:'odometer', label:'قراءة العداد (كم)', ph:'مثال: 84,500 كم'},
+    {k:'condition', type:'textarea', label:'حالة المركبة والملحقات المرفقة', span:2, rows:3, ph:'مثال: المركبة بحالة فنية جيدة مع الإطار الاحتياطي، طفاية الحريق، وكافة أوراقها الرسمية.'},
+    {k:'date', type:'date', label:'تاريخ التسليم'},
+  ],
+  noTo:true,
+  subject: (v) => `محضر تسليم واستلام مركبة (${v.plate || '...'})`,
+  body: (v) => `
+    <p>إنه في يوم الموافق <b>${fdate(v.date)}</b>، تم بمقر <b>مجموعة شركات الصداقة المثالية</b> تسليم المركبة المبينة أوصافها أدناه على سبيل العهدة لمتطلبات العمل:</p>
+    <table style="width:100%;border-collapse:collapse;margin:4mm 0 5mm;font-size:11pt">
+      <tbody>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700;width:22%">اسم المستلم</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;width:28%"><b>${esc(v.holder || '................')}</b></td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700;width:22%">الرقم الوطني / الصفة</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;width:28%">${esc(v.nationalId || '—')}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">نوع السيارة</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px"><b>${esc(v.vehicle || '................')}</b></td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">رقم اللوحة</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;direction:ltr;text-align:right"><b>${esc(v.plate || '................')}</b></td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">انتهاء التأمين</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;direction:ltr;text-align:right">${esc(v.insurance || '—')}</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">انتهاء الفحص الفني</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;direction:ltr;text-align:right">${esc(v.inspection || '—')}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">انتهاء البل</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;direction:ltr;text-align:right">${esc(v.vignette || '—')}</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px;background:#f2f6fc;font-weight:700">قراءة العداد</td>
+          <td style="border:1px solid #8a9bb5;padding:5px 9px">${esc(v.odometer || '—')}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><b>حالة المركبة والملحقات:</b> ${esc(v.condition || 'المركبة بحالة جيدة وكاملة الأوراق الرسمية والملحقات الأساسية.')}</p>
+    <p>ويقرّ المستلم باستلامه للمركبة المذكورة أعلاه والتزامه بالمحافظة عليها وإجراء الصيانة الدورية في مواعيدها، وإبلاغ الإدارة فور أي طارئ أو قبل انتهاء صلاحية وثائقها الرسمية.</p>`,
+  customSign: (v, c) => `
+    <div class="l-sign" style="justify-content:space-between;gap:10mm;margin-top:9mm">
+      <div class="blk" style="min-width:48mm"><div class="t">المُسلِّم / مسؤول الحركة</div><div class="space" style="height:14mm"></div><div class="nm">التوقيع: ....................</div></div>
+      <div class="blk" style="min-width:48mm"><div class="t">المُستلِم</div><div class="space" style="height:14mm"></div><div class="nm">${esc(v.holder || '....................')}</div></div>
+      <div class="blk" style="min-width:48mm"><div class="t">${esc(c.company.signTitle || 'اعتماد الإدارة')}</div><div class="space" style="height:14mm"></div><div class="nm">${esc(c.company.signName || 'التوقيع والختم')}</div></div>
+    </div>`,
+},
+
+/* ---------- 12) تفويض رسمي للمندوب / المعقّب ---------- */
+{
+  id:'group_auth', cat:'group', icon:'🪪', code:'TFW', name:'تفويض رسمي لمراجعة الجهات',
+  desc:'تفويض موظف أو مندوب لمتابعة معاملات المجموعة لدى المصارف والجمارك والمصالح',
+  dualLogo:true,
+  personKey:'employeeName',
+  fields:[
+    ...EMP_FIELDS,
+    {k:'destination', label:'الجهة المقصودة بالتفويض', req:true, span:2, ph:'مثال: مصلحة الجمارك / قسم المرور والترخيص / السجل التجاري'},
+    {k:'taskScope', type:'textarea', label:'موضوع وحدود التفويض', req:true, span:2, rows:4, ph:'مثال: استلام وتجديد كتيبات المركبات وإتمام إجراءات الفحص الفني والتأمين'},
+    {k:'validUntil', type:'date', label:'صالح لغاية تاريخ'},
+    {k:'date', type:'date', label:'تاريخ الإصدار'},
+  ],
+  subject: () => 'تفويض رسمي',
+  to: (v) => `<div class="l-to">السادة/ <b>${esc(v.destination || '.............................')}</b> — المحترمين</div>`,
+  body: (v,c) => `
+    <p>تفوّض إدارة <b>مجموعة شركات الصداقة المثالية</b> (${esc(c.company.name)}) السيد/السيدة: <b>${esc(v.employeeName || '.............................')}</b>${v.nationalId? `، الحامل/ة للرقم الوطني <b>${esc(v.nationalId)}</b>`:''}${v.position? `، بوظيفة <b>${esc(v.position)}</b>`:''}، بمراجعتكم والقيام نيابةً عن الشركة بما يلي:</p>
+    <p class="indent"><b>${esc(v.taskScope || '..........................................................')}</b></p>
+    ${v.validUntil? `<p>يسري العمل بهذا التفويض حتى تاريخ <b>${fdate(v.validUntil)}</b>.</p>`:''}
+    <p>ونأمل من سيادتكم تقديم التسهيلات اللازمة لإنجاز المهمة المكلف بها، مع خالص الشكر والتقدير.</p>`,
 },
 ];
 
