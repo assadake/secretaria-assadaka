@@ -40,7 +40,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, 'config.json')
-APP_VERSION = '1.4.0'
+APP_VERSION = '1.5.0'
 
 # ---- mise à jour de l'application (depuis l'interface locale) ----
 UPDATE_ALLOWED = {'index.html', 'secretariat.html', 'server.py'}
@@ -127,12 +127,34 @@ SEED_COMPANIES = [
 # ============================================================
 #  Utilitaires communs de stockage
 # ============================================================
-DOC_KINDS = ('company', 'employee', 'letter', 'credit')
-LISTED_KINDS = ('company', 'employee', 'letter', 'credit')
+DOC_KIND_MAP = {
+    'company': 'companies',
+    'employee': 'employees',
+    'letter': 'letters',
+    'credit': 'credits',
+    'group_doc': 'groupDocs',
+    'tracker': 'trackers',
+}
+DOC_KINDS = tuple(DOC_KIND_MAP.keys())
+LISTED_KINDS = DOC_KINDS
 
 
 def _new_doc_id():
     return base64.urlsafe_b64encode(os.urandom(9)).decode('ascii').rstrip('=')
+
+
+def _empty_state():
+    return {
+        'settings': dict(SEED_SETTINGS),
+        'companies': [],
+        'employees': [],
+        'letters': [],
+        'credits': [],
+        'groupDocs': [],
+        'trackers': [],
+        'counter': {},
+        'rev': 0
+    }
 
 
 def _sort_state(out):
@@ -141,6 +163,10 @@ def _sort_state(out):
     out['employees'].sort(key=lambda e: e.get('name', ''))
     out.setdefault('credits', [])
     out['credits'].sort(key=lambda c: c.get('updatedAt') or c.get('createdAt') or 0, reverse=True)
+    out.setdefault('groupDocs', [])
+    out['groupDocs'].sort(key=lambda d: d.get('updatedAt') or d.get('createdAt') or 0, reverse=True)
+    out.setdefault('trackers', [])
+    out['trackers'].sort(key=lambda t: (t.get('order', 99), t.get('createdAt', 0)))
     return out
 
 
@@ -367,22 +393,14 @@ class PostgresStore:
 
     def state(self):
         def _op(cur):
-            out = {
-                'settings': dict(SEED_SETTINGS),
-                'companies': [],
-                'employees': [],
-                'letters': [],
-                'credits': [],
-                'counter': {},
-                'rev': 0
-            }
+            out = _empty_state()
             cur.execute("SELECT kind, id, json FROM docs")
             for kind, doc_id, raw_json in cur.fetchall():
                 data = json.loads(raw_json)
                 if kind == 'setting' and doc_id == 'main':
                     out['settings'].update(data)
-                elif kind in LISTED_KINDS:
-                    out[kind + 's' if kind != 'company' else 'companies'].append(data)
+                elif kind in DOC_KIND_MAP:
+                    out[DOC_KIND_MAP[kind]].append(data)
             cur.execute("SELECT name, value FROM counters")
             for name, val in cur.fetchall():
                 out['counter'][name] = int(val)
@@ -393,7 +411,7 @@ class PostgresStore:
         return self._run(_op)
 
     def upsert(self, kind, data):
-        if kind not in DOC_KINDS:
+        if kind not in DOC_KIND_MAP:
             raise ValueError('kind invalide')
         data = dict(data or {})
         if not data.get('id'):
@@ -453,7 +471,7 @@ class PostgresStore:
             cur.execute("DELETE FROM docs")
             cur.execute("DELETE FROM counters")
             now = int(time.time())
-            for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters'), ('credit', 'credits')):
+            for kind, key in DOC_KIND_MAP.items():
                 for item in payload.get(key) or []:
                     item = dict(item)
                     item.setdefault('id', _new_doc_id())
@@ -608,22 +626,14 @@ class SQLiteStore:
         with self.lock:
             con = self.connect()
             try:
-                out = {
-                    'settings': dict(SEED_SETTINGS),
-                    'companies': [],
-                    'employees': [],
-                    'letters': [],
-                    'credits': [],
-                    'counter': {},
-                    'rev': 0
-                }
+                out = _empty_state()
                 for row in con.execute("SELECT kind,id,json FROM docs"):
                     data = json.loads(row['json'])
                     k = row['kind']
                     if k == 'setting' and row['id'] == 'main':
                         out['settings'].update(data)
-                    elif k in LISTED_KINDS:
-                        out[k + 's' if k != 'company' else 'companies'].append(data)
+                    elif k in DOC_KIND_MAP:
+                        out[DOC_KIND_MAP[k]].append(data)
                 for crow in con.execute("SELECT name, value FROM counters"):
                     out['counter'][crow['name']] = int(crow['value'])
                 r = con.execute("SELECT v FROM meta WHERE k='rev'").fetchone()
@@ -633,7 +643,7 @@ class SQLiteStore:
                 con.close()
 
     def upsert(self, kind, data):
-        if kind not in DOC_KINDS:
+        if kind not in DOC_KIND_MAP:
             raise ValueError('kind invalide')
         data = dict(data or {})
         if not data.get('id'):
@@ -702,7 +712,7 @@ class SQLiteStore:
                 con.execute("DELETE FROM docs")
                 con.execute("DELETE FROM counters")
                 now = int(time.time())
-                for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters'), ('credit', 'credits')):
+                for kind, key in DOC_KIND_MAP.items():
                     for item in payload.get(key) or []:
                         item = dict(item)
                         item.setdefault('id', _new_doc_id())
@@ -925,7 +935,8 @@ def record_login_result(ip, success):
 # ============================================================
 #  Initialisation du magasin de données actif
 # ============================================================
-DB_PATH = CFG['db'] if os.path.isabs(CFG['db']) else os.path.join(APP_DIR, CFG['db'])
+_raw_db = os.environ.get('DB_PATH') or CFG['db']
+DB_PATH = _raw_db if os.path.isabs(_raw_db) else os.path.join(APP_DIR, _raw_db)
 STORE = None
 
 

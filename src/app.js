@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.4.0';
+const APP_VER = '1.5.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -63,6 +63,8 @@ const DEFAULT_DB = {
   employees:[],
   letters:[],
   credits:[],
+  groupDocs:[],
+  trackers:[],
   counter:{},
 };
 
@@ -72,7 +74,13 @@ let DB = loadDB();
 function loadDB(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
-    if(!raw) return structuredClone(DEFAULT_DB);
+    if(!raw){
+      const init = structuredClone(DEFAULT_DB);
+      ensureStationeriesOn(init);
+      if(typeof crEnsure === 'function') crEnsure(init);
+      ensureGroupDefaultsOn(init);
+      return init;
+    }
     const db = JSON.parse(raw);
     db.settings = Object.assign({}, DEFAULT_DB.settings, db.settings||{});
     db.companies = (db.companies && db.companies.length) ? db.companies : structuredClone(DEFAULT_COMPANIES);
@@ -93,14 +101,20 @@ function loadDB(){
       db.version = 3;
     }
     db.companies.forEach(c=>{ if(c.layout===undefined) c.layout = c.id==='ais' ? 'ais':'aisbm'; });
-    db.employees = db.employees||[]; db.letters = db.letters||[]; db.counter = db.counter||{};
+    db.employees = db.employees||[]; db.letters = db.letters||[];
+    db.credits = db.credits||[]; db.groupDocs = db.groupDocs||[]; db.trackers = db.trackers||[]; db.counter = db.counter||{};
     ensureStationeriesOn(db);
     if(typeof crEnsure === 'function') crEnsure(db);
+    ensureGroupDefaultsOn(db);
     return db;
   }catch(e){
     console.warn('التخزين غير متاح (وضع المعاينة)', e);
     storageOK = false;
-    return structuredClone(DEFAULT_DB);
+    const fb = structuredClone(DEFAULT_DB);
+    ensureStationeriesOn(fb);
+    if(typeof crEnsure === 'function') crEnsure(fb);
+    ensureGroupDefaultsOn(fb);
+    return fb;
   }
 }
 let saveTimer=null;
@@ -321,10 +335,13 @@ function renderSheetHTML(tpl, v, opts={}){
   const closing  = tpl.closing ? tpl.closing(v,{company:co}) : 'وتفضلوا بقبول فائق الاحترام والتقدير';
   const attach   = v.attach ? `<p class="mt8"><b>المرفقات:</b> ${esc(v.attach)}</p>` : '';
 
-  const sign = (tpl.id==='memo')
-    ? `<div class="l-sign"><div class="blk"><div class="t">${esc(co.signTitle||'')}</div><div class="space"></div><div class="nm">${esc(co.signName||'الاسم / التوقيع')}</div></div></div>`
-    : `<div class="l-sign"><div class="blk"><div class="t">${esc(co.signTitle||'الإدارة العامة')}</div><div class="space"></div><div class="nm">${esc(co.signName||'الاسم / التوقيع والختم')}</div></div>${st.showStamp?`<div class="stamp">الختم الرسمي</div>`:''}</div>`;
+  const sign = tpl.customSign
+    ? tpl.customSign(v, {company:co})
+    : (tpl.id==='memo')
+      ? `<div class="l-sign"><div class="blk"><div class="t">${esc(co.signTitle||'')}</div><div class="space"></div><div class="nm">${esc(co.signName||'الاسم / التوقيع')}</div></div></div>`
+      : `<div class="l-sign"><div class="blk"><div class="t">${esc(co.signTitle||'الإدارة العامة')}</div><div class="space"></div><div class="nm">${esc(co.signName||'الاسم / التوقيع والختم')}</div></div>${st.showStamp?`<div class="stamp">الختم الرسمي</div>`:''}</div>`;
 
+  const useDualGroup = !!(tpl.dualLogo || lay === 'group');
   const showWM = (std.useWatermark !== false) && st.showWatermark !== false && a.watermark && !fullpage;
   const wmHTML = showWM ? `<div class="watermark wm-img"><img src="${a.watermark}" alt=""></div>` : '';
 
@@ -335,7 +352,7 @@ function renderSheetHTML(tpl, v, opts={}){
         ${toHTML}
         ${subj? `<div class="l-subject">الموضوع: ${esc(subj)}</div>`:''}
         <div class="l-body">${bodyHTML}</div>
-        ${(tpl.id==='memo')? '' : `<p class="mt14">${esc(closing)}</p>`}
+        ${(tpl.id==='memo' || tpl.id==='handover_vehicle')? '' : `<p class="mt14">${esc(closing)}</p>`}
         ${attach}
         ${sign}
       </div>`;
@@ -348,6 +365,18 @@ function renderSheetHTML(tpl, v, opts={}){
       <div class="sheet-content" style="padding-top:${pt}mm;padding-bottom:${pb}mm">
         ${inner}
       </div>
+    </div>`;
+  }
+
+  if(useDualGroup && !std.headerImg){
+    return `
+    <div class="sheet first-page" data-layout="group">
+      ${renderSheetDualBannerHTML()}
+      ${wmHTML}
+      <div class="sheet-content">
+        ${inner}
+      </div>
+      ${std.footerImg ? `<div class="lh-foot"><img src="${a.footer}" alt=""></div>` : renderSheetDualFooterHTML()}
     </div>`;
   }
 
@@ -389,10 +418,12 @@ window.addEventListener('afterprint', ()=>{
 
 /* ---------------- التنقل ---------------- */
 const ROUTES = {
-  dash:{title:'لوحة التحكم', sub:'نظرة عامة على المراسلات والأرشيف'},
+  dash:{title:'لوحة التحكم', sub:'نظرة عامة على المراسلات والأرشيف ومتابعة المجموعة'},
   new:{title:'خطاب جديد', sub:'اختر النموذج، املأ البيانات، ثم أرشِف أو اطبع'},
   archive:{title:'الأرشيف', sub:'البحث والرجوع إلى الخطابات الصادرة'},
   credits:{title:'الاعتمادات البنكية', sub:'ملفات الاعتماد: المستندات، سير الإجراءات، المتابعة والأرشفة'},
+  trackers:{title:'جداول المتابعة اليومية', sub:'متابعة السيارات (AIS • الأبطال)، التراخيص، الإقامات، الشحنات والمراجعات اليومية'},
+  group:{title:'وثائق المجموعة المشتركة', sub:'السجلات، العقود، التعميمات واللوائح المشتركة بين شركات مجموعة الصداقة المثالية'},
   employees:{title:'الموظفون', sub:'قائمة الموظفين لتعبئة الخطابات تلقائياً'},
   companies:{title:'الشركات', sub:'بيانات الشركات والترويسة والتوقيع'},
   settings:{title:'الإعدادات والنسخ الاحتياطي', sub:'التفضيلات، التصدير والاستيراد'},
@@ -446,6 +477,8 @@ function render(route){
     if(cid){ creditOpenId = cid; box.innerHTML = viewCredit(cid); }
     else { creditOpenId = ''; box.innerHTML = viewCredits(); }
   }
+  else if(name==='trackers') box.innerHTML = viewTrackers();
+  else if(name==='group') box.innerHTML = viewGroupDocs();
   else if(name==='employees') box.innerHTML = viewEmployees();
   else if(name==='companies') box.innerHTML = viewCompanies();
   else if(name==='settings') box.innerHTML = viewSettings();
@@ -471,9 +504,11 @@ function viewDash(){
   <div class="stats">
     <div class="stat"><div class="ico">📚</div><div><div class="v">${L.length}</div><div class="l">إجمالي الخطابات في الأرشيف</div></div></div>
     <div class="stat green"><div class="ico">✅</div><div><div class="v">${archived}</div><div class="l">خطابات مُعتمدة ومؤرشفة</div></div></div>
-    <div class="stat gold"><div class="ico">📅</div><div><div class="v">${thisMonth}</div><div class="l">صادرة هذا الشهر</div></div></div>
-    <div class="stat red"><div class="ico">🏢</div><div><div class="v">${DB.companies.length}</div><div class="l">الشركات المُدارة</div></div></div>
+    <div class="stat gold" style="cursor:pointer" data-go="trackers"><div class="ico">📊</div><div><div class="v">${(DB.trackers||[]).length}</div><div class="l">جداول المتابعة النشطة</div></div></div>
+    <div class="stat red" style="cursor:pointer" data-go="group"><div class="ico">🗂️</div><div><div class="v">${(DB.groupDocs||[]).length}</div><div class="l">وثائق المجموعة المشتركة</div></div></div>
   </div>
+
+  ${renderDashGroupAlertsHTML()}
 
   ${(()=>{ crEnsure(DB); const all = DB.credits||[]; if(!all.length) return '';
     const cs = creditStats(all);
@@ -946,11 +981,21 @@ function viewSettings(){
    ربط الأحداث
    ============================================================ */
 function bindView(name){
+  if(name==='dash'){
+    $$('[data-open]').forEach(b=>b.onclick=()=>openRecordModal(b.dataset.open));
+    $$('[data-alert-jump]').forEach(el=>el.onclick=()=>{
+      const [kind, tid] = el.dataset.alertJump.split(':');
+      if(kind==='tracker'){ trackerUI.activeId = tid; trackerUI.expFilter = 'alerts'; go('trackers'); }
+      else { go('group'); }
+    });
+  }
   if(name==='new') bindComposer();
   if(name==='archive') bindArchive();
   if(name==='credits'){
     if(creditOpenId) bindCreditDetail(creditOpenId); else bindCredits();
   }
+  if(name==='trackers') bindTrackers();
+  if(name==='group') bindGroupDocs();
   if(name==='employees') bindEmployees();
   if(name==='companies') bindCompanies();
   if(name==='settings') bindSettings();
@@ -981,8 +1026,8 @@ function updatePreview(){
 /* حساب هوامش المحتوى من ارتفاع الترويسة والتذييل الفعليين */
 function adaptPadding(sheet){
   if(!sheet) return;
-  const head = sheet.querySelector('.lh-head img');
-  const foot = sheet.querySelector('.lh-foot img');
+  const head = sheet.querySelector('.lh-head img') || sheet.querySelector('.lh-head');
+  const foot = sheet.querySelector('.lh-foot img') || sheet.querySelector('.lh-foot');
   const h = head ? head.getBoundingClientRect().height / (sheet._scale||1) : 0;
   const f = foot ? foot.getBoundingClientRect().height / (sheet._scale||1) : 0;
   if(!h && !f) return;
@@ -1291,8 +1336,9 @@ function renderStationeryModal(co, isEdit){
           </select></div>
         <div class="field"><label>التصميم الأساسي (للصور الافتراضية)</label>
           <select id="stdLayout">
-            <option value="ais" ${d.layout!=='aisbm'?'selected':''}>الصداقة المثالية (أغذية)</option>
+            <option value="ais" ${d.layout==='ais' || (!d.layout)?'selected':''}>الصداقة المثالية (أغذية — AIS)</option>
             <option value="aisbm" ${d.layout==='aisbm'?'selected':''}>الصداقة المثالية (مواد بناء)</option>
+            <option value="group" ${d.layout==='group'?'selected':''}>ترويسة المجموعة المشتركة (AIS + الأبطال)</option>
           </select></div>
         <div class="field"><label>&nbsp;</label>
           <label class="flex" style="gap:8px;font-size:13px;padding-top:9px">
@@ -1535,13 +1581,14 @@ function bindSettings(){
       if(API_ON){
         if(!confirm('سيتم استبدال كامل الأرشيف المشترك بمحتوى الملف. متابعة؟')) return;
         const res = await apiFetch('PUT','api/state',{
-          settings: db.settings, companies: db.companies, employees: db.employees, letters: db.letters, credits: db.credits||[], counter: db.counter
+          settings: db.settings, companies: db.companies, employees: db.employees,
+          letters: db.letters, credits: db.credits||[], groupDocs: db.groupDocs||[], trackers: db.trackers||[], counter: db.counter
         });
         if(res && res.rev) DB_REV = res.rev;
         await reloadState();
         toast('تم استيراد الأرشيف المشترك'); render('settings'); return;
       }
-      DB = db; crEnsure(DB); saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
+      DB = db; crEnsure(DB); ensureGroupDefaultsOn(DB); saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
     }catch(e){ toast('ملف غير صالح','err'); } };
     r.readAsText(f);
   };
@@ -1650,11 +1697,13 @@ async function reloadState(keepRoute){
   if(!st || st.__status) return false;
   DB = {
     version:3, settings: st.settings || {}, companies: st.companies || [],
-    employees: st.employees || [], letters: st.letters || [], credits: st.credits || [], counter: {},
+    employees: st.employees || [], letters: st.letters || [], credits: st.credits || [],
+    groupDocs: st.groupDocs || [], trackers: st.trackers || [], counter: st.counter || {},
   };
   DB_REV = st.rev || 0;
   ensureStationeries();
   crEnsure(DB);
+  await syncInitialGroupSeedIfNeeded();
   updateSyncBadge();
   if(keepRoute) render(currentRoute);
   return true;
