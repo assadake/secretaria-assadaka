@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.4.0';
+const APP_VER = '1.5.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -62,6 +62,7 @@ const DEFAULT_DB = {
   companies: DEFAULT_COMPANIES,
   employees:[],
   letters:[],
+  credits:[],
   groupDocs:[],
   trackers:[],
   counter:{},
@@ -76,6 +77,7 @@ function loadDB(){
     if(!raw){
       const init = structuredClone(DEFAULT_DB);
       ensureStationeriesOn(init);
+      if(typeof crEnsure === 'function') crEnsure(init);
       ensureGroupDefaultsOn(init);
       return init;
     }
@@ -100,8 +102,9 @@ function loadDB(){
     }
     db.companies.forEach(c=>{ if(c.layout===undefined) c.layout = c.id==='ais' ? 'ais':'aisbm'; });
     db.employees = db.employees||[]; db.letters = db.letters||[];
-    db.groupDocs = db.groupDocs||[]; db.trackers = db.trackers||[]; db.counter = db.counter||{};
+    db.credits = db.credits||[]; db.groupDocs = db.groupDocs||[]; db.trackers = db.trackers||[]; db.counter = db.counter||{};
     ensureStationeriesOn(db);
+    if(typeof crEnsure === 'function') crEnsure(db);
     ensureGroupDefaultsOn(db);
     return db;
   }catch(e){
@@ -109,6 +112,7 @@ function loadDB(){
     storageOK = false;
     const fb = structuredClone(DEFAULT_DB);
     ensureStationeriesOn(fb);
+    if(typeof crEnsure === 'function') crEnsure(fb);
     ensureGroupDefaultsOn(fb);
     return fb;
   }
@@ -417,6 +421,7 @@ const ROUTES = {
   dash:{title:'لوحة التحكم', sub:'نظرة عامة على المراسلات والأرشيف ومتابعة المجموعة'},
   new:{title:'خطاب جديد', sub:'اختر النموذج، املأ البيانات، ثم أرشِف أو اطبع'},
   archive:{title:'الأرشيف', sub:'البحث والرجوع إلى الخطابات الصادرة'},
+  credits:{title:'الاعتمادات البنكية', sub:'ملفات الاعتماد: المستندات، سير الإجراءات، المتابعة والأرشفة'},
   trackers:{title:'جداول المتابعة اليومية', sub:'متابعة السيارات (AIS • الأبطال)، التراخيص، الإقامات، الشحنات والمراجعات اليومية'},
   group:{title:'وثائق المجموعة المشتركة', sub:'السجلات، العقود، التعميمات واللوائح المشتركة بين شركات مجموعة الصداقة المثالية'},
   employees:{title:'الموظفون', sub:'قائمة الموظفين لتعبئة الخطابات تلقائياً'},
@@ -424,6 +429,7 @@ const ROUTES = {
   settings:{title:'الإعدادات والنسخ الاحتياطي', sub:'التفضيلات، التصدير والاستيراد'},
 };
 let currentRoute = 'dash';
+let creditOpenId = '';      // ملف الاعتماد المفتوح حالياً (إن وُجد)
 let composerState = { tplId:null, values:{}, editingId:null, ref:null };
 
 function freshComposer(tplId){
@@ -466,6 +472,11 @@ function render(route){
   if(name==='dash') box.innerHTML = viewDash();
   else if(name==='new') box.innerHTML = viewComposer();
   else if(name==='archive') box.innerHTML = viewArchive();
+  else if(name==='credits'){
+    const cid = String(route||currentRoute).split('/')[1] || '';
+    if(cid){ creditOpenId = cid; box.innerHTML = viewCredit(cid); }
+    else { creditOpenId = ''; box.innerHTML = viewCredits(); }
+  }
   else if(name==='trackers') box.innerHTML = viewTrackers();
   else if(name==='group') box.innerHTML = viewGroupDocs();
   else if(name==='employees') box.innerHTML = viewEmployees();
@@ -498,6 +509,26 @@ function viewDash(){
   </div>
 
   ${renderDashGroupAlertsHTML()}
+
+  ${(()=>{ crEnsure(DB); const all = DB.credits||[]; if(!all.length) return '';
+    const cs = creditStats(all);
+    const attention = all.filter(d=>creditHealth(d).level==='danger' && !['closed','rejected'].includes(d.status)).slice(0,4);
+    return `<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>🏦 الاعتمادات البنكية</h3>
+        <span class="badge blue">${cs.active} ملف جارٍ</span>
+        ${cs.late? `<span class="badge red">${cs.late} يحتاج تدخلاً</span>`:''}
+        <div class="spacer"></div>
+        <button class="btn btn-sm btn-primary" data-go="credits">فتح منطقة الاعتمادات ←</button>
+      </div>
+      ${attention.length? `<div class="small muted mb10">ملفات تحتاج متابعة:</div>
+      ${attention.map(d=>`<div class="flex" style="justify-content:space-between;border-bottom:1px dashed var(--line);padding:7px 0;flex-wrap:wrap">
+        <span><b>${esc(d.customerName||'')}</b> <span class="small muted">${esc(d.ref||'')} · ${esc(d.bank||'')}</span></span>
+        <span class="badge red">${esc(creditHealth(d).label)}</span>
+        <button class="btn btn-sm" data-go="credits">متابعة</button>
+      </div>`).join('')}`
+      : `<div class="small muted">لا توجد ملفات متأخرة — ${cs.closed} ملف مغلق ومؤرشف حتى الآن.</div>`}
+    </div>`;
+  })()}
 
   <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px" class="dash-grid">
     <div class="card pad0">
@@ -960,6 +991,9 @@ function bindView(name){
   }
   if(name==='new') bindComposer();
   if(name==='archive') bindArchive();
+  if(name==='credits'){
+    if(creditOpenId) bindCreditDetail(creditOpenId); else bindCredits();
+  }
   if(name==='trackers') bindTrackers();
   if(name==='group') bindGroupDocs();
   if(name==='employees') bindEmployees();
@@ -1548,13 +1582,13 @@ function bindSettings(){
         if(!confirm('سيتم استبدال كامل الأرشيف المشترك بمحتوى الملف. متابعة؟')) return;
         const res = await apiFetch('PUT','api/state',{
           settings: db.settings, companies: db.companies, employees: db.employees,
-          letters: db.letters, groupDocs: db.groupDocs, trackers: db.trackers, counter: db.counter
+          letters: db.letters, credits: db.credits||[], groupDocs: db.groupDocs||[], trackers: db.trackers||[], counter: db.counter
         });
         if(res && res.rev) DB_REV = res.rev;
         await reloadState();
         toast('تم استيراد الأرشيف المشترك'); render('settings'); return;
       }
-      DB = db; saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
+      DB = db; crEnsure(DB); ensureGroupDefaultsOn(DB); saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
     }catch(e){ toast('ملف غير صالح','err'); } };
     r.readAsText(f);
   };
@@ -1663,11 +1697,12 @@ async function reloadState(keepRoute){
   if(!st || st.__status) return false;
   DB = {
     version:3, settings: st.settings || {}, companies: st.companies || [],
-    employees: st.employees || [], letters: st.letters || [],
+    employees: st.employees || [], letters: st.letters || [], credits: st.credits || [],
     groupDocs: st.groupDocs || [], trackers: st.trackers || [], counter: st.counter || {},
   };
   DB_REV = st.rev || 0;
   ensureStationeries();
+  crEnsure(DB);
   await syncInitialGroupSeedIfNeeded();
   updateSyncBadge();
   if(keepRoute) render(currentRoute);

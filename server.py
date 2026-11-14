@@ -40,7 +40,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, 'config.json')
-APP_VERSION = '1.4.0'
+APP_VERSION = '1.5.0'
 
 # ---- mise à jour de l'application (depuis l'interface locale) ----
 UPDATE_ALLOWED = {'index.html', 'secretariat.html', 'server.py'}
@@ -127,17 +127,20 @@ SEED_COMPANIES = [
 # ============================================================
 #  Utilitaires communs de stockage
 # ============================================================
-def _new_doc_id():
-    return base64.urlsafe_b64encode(os.urandom(9)).decode('ascii').rstrip('=')
-
-
 DOC_KIND_MAP = {
     'company': 'companies',
     'employee': 'employees',
     'letter': 'letters',
+    'credit': 'credits',
     'group_doc': 'groupDocs',
     'tracker': 'trackers',
 }
+DOC_KINDS = tuple(DOC_KIND_MAP.keys())
+LISTED_KINDS = DOC_KINDS
+
+
+def _new_doc_id():
+    return base64.urlsafe_b64encode(os.urandom(9)).decode('ascii').rstrip('=')
 
 
 def _empty_state():
@@ -146,6 +149,7 @@ def _empty_state():
         'companies': [],
         'employees': [],
         'letters': [],
+        'credits': [],
         'groupDocs': [],
         'trackers': [],
         'counter': {},
@@ -157,7 +161,11 @@ def _sort_state(out):
     out['letters'].sort(key=lambda l: l.get('createdAt', 0), reverse=True)
     out['companies'].sort(key=lambda c: 0 if c.get('id') == 'ais' else 1)
     out['employees'].sort(key=lambda e: e.get('name', ''))
+    out.setdefault('credits', [])
+    out['credits'].sort(key=lambda c: c.get('updatedAt') or c.get('createdAt') or 0, reverse=True)
+    out.setdefault('groupDocs', [])
     out['groupDocs'].sort(key=lambda d: d.get('updatedAt') or d.get('createdAt') or 0, reverse=True)
+    out.setdefault('trackers', [])
     out['trackers'].sort(key=lambda t: (t.get('order', 99), t.get('createdAt', 0)))
     return out
 
@@ -186,11 +194,15 @@ def _extract_counters_from_payload(payload):
             norm_key = '|'.join(parts)
             counters[norm_key] = max(counters.get(norm_key, 0), val)
 
-    # S'assure que les compteurs ne redescendent pas sous les numéros déjà attribués aux lettres
-    for letter in (payload.get('letters') or []):
+    # S'assure que les compteurs ne redescendent pas sous les numéros déjà attribués
+    numbered = list(payload.get('letters') or [])
+    for credit in (payload.get('credits') or []):
+        if isinstance(credit, dict):
+            numbered.append(dict(credit, tplCode='CRD'))
+    for letter in numbered:
         if not isinstance(letter, dict):
             continue
-        co_code = id_to_code.get(str(letter.get('companyId') or ''), '')
+        co_code = id_to_code.get(str(letter.get('companyId') or ''), '') or id_to_code.get('ais', '')
         tpl_code = str(letter.get('tplCode') or '')
         ref = str(letter.get('ref') or '')
         created = letter.get('createdAt')
