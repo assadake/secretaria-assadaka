@@ -40,7 +40,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, 'config.json')
-APP_VERSION = '1.3.0'
+APP_VERSION = '1.4.0'
 
 # ---- mise à jour de l'application (depuis l'interface locale) ----
 UPDATE_ALLOWED = {'index.html', 'secretariat.html', 'server.py'}
@@ -127,6 +127,10 @@ SEED_COMPANIES = [
 # ============================================================
 #  Utilitaires communs de stockage
 # ============================================================
+DOC_KINDS = ('company', 'employee', 'letter', 'credit')
+LISTED_KINDS = ('company', 'employee', 'letter', 'credit')
+
+
 def _new_doc_id():
     return base64.urlsafe_b64encode(os.urandom(9)).decode('ascii').rstrip('=')
 
@@ -135,6 +139,8 @@ def _sort_state(out):
     out['letters'].sort(key=lambda l: l.get('createdAt', 0), reverse=True)
     out['companies'].sort(key=lambda c: 0 if c.get('id') == 'ais' else 1)
     out['employees'].sort(key=lambda e: e.get('name', ''))
+    out.setdefault('credits', [])
+    out['credits'].sort(key=lambda c: c.get('updatedAt') or c.get('createdAt') or 0, reverse=True)
     return out
 
 
@@ -162,11 +168,15 @@ def _extract_counters_from_payload(payload):
             norm_key = '|'.join(parts)
             counters[norm_key] = max(counters.get(norm_key, 0), val)
 
-    # S'assure que les compteurs ne redescendent pas sous les numéros déjà attribués aux lettres
-    for letter in (payload.get('letters') or []):
+    # S'assure que les compteurs ne redescendent pas sous les numéros déjà attribués
+    numbered = list(payload.get('letters') or [])
+    for credit in (payload.get('credits') or []):
+        if isinstance(credit, dict):
+            numbered.append(dict(credit, tplCode='CRD'))
+    for letter in numbered:
         if not isinstance(letter, dict):
             continue
-        co_code = id_to_code.get(str(letter.get('companyId') or ''), '')
+        co_code = id_to_code.get(str(letter.get('companyId') or ''), '') or id_to_code.get('ais', '')
         tpl_code = str(letter.get('tplCode') or '')
         ref = str(letter.get('ref') or '')
         created = letter.get('createdAt')
@@ -362,6 +372,7 @@ class PostgresStore:
                 'companies': [],
                 'employees': [],
                 'letters': [],
+                'credits': [],
                 'counter': {},
                 'rev': 0
             }
@@ -370,7 +381,7 @@ class PostgresStore:
                 data = json.loads(raw_json)
                 if kind == 'setting' and doc_id == 'main':
                     out['settings'].update(data)
-                elif kind in ('company', 'employee', 'letter'):
+                elif kind in LISTED_KINDS:
                     out[kind + 's' if kind != 'company' else 'companies'].append(data)
             cur.execute("SELECT name, value FROM counters")
             for name, val in cur.fetchall():
@@ -382,7 +393,7 @@ class PostgresStore:
         return self._run(_op)
 
     def upsert(self, kind, data):
-        if kind not in ('company', 'employee', 'letter'):
+        if kind not in DOC_KINDS:
             raise ValueError('kind invalide')
         data = dict(data or {})
         if not data.get('id'):
@@ -442,7 +453,7 @@ class PostgresStore:
             cur.execute("DELETE FROM docs")
             cur.execute("DELETE FROM counters")
             now = int(time.time())
-            for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters')):
+            for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters'), ('credit', 'credits')):
                 for item in payload.get(key) or []:
                     item = dict(item)
                     item.setdefault('id', _new_doc_id())
@@ -602,6 +613,7 @@ class SQLiteStore:
                     'companies': [],
                     'employees': [],
                     'letters': [],
+                    'credits': [],
                     'counter': {},
                     'rev': 0
                 }
@@ -610,7 +622,7 @@ class SQLiteStore:
                     k = row['kind']
                     if k == 'setting' and row['id'] == 'main':
                         out['settings'].update(data)
-                    elif k in ('company', 'employee', 'letter'):
+                    elif k in LISTED_KINDS:
                         out[k + 's' if k != 'company' else 'companies'].append(data)
                 for crow in con.execute("SELECT name, value FROM counters"):
                     out['counter'][crow['name']] = int(crow['value'])
@@ -621,7 +633,7 @@ class SQLiteStore:
                 con.close()
 
     def upsert(self, kind, data):
-        if kind not in ('company', 'employee', 'letter'):
+        if kind not in DOC_KINDS:
             raise ValueError('kind invalide')
         data = dict(data or {})
         if not data.get('id'):
@@ -690,7 +702,7 @@ class SQLiteStore:
                 con.execute("DELETE FROM docs")
                 con.execute("DELETE FROM counters")
                 now = int(time.time())
-                for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters')):
+                for kind, key in (('company', 'companies'), ('employee', 'employees'), ('letter', 'letters'), ('credit', 'credits')):
                     for item in payload.get(key) or []:
                         item = dict(item)
                         item.setdefault('id', _new_doc_id())

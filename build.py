@@ -9,13 +9,14 @@ parts = {
     'style': SRC / 'style.css',
     'assets': SRC / 'assets.js',
     'templates': SRC / 'templates.js',
+    'credits': SRC / 'credits.js',
     'app': SRC / 'app.js',
 }
 
 html = (SRC / 'index.html').read_text(encoding='utf-8')
 for key, path in parts.items():
     content = path.read_text(encoding='utf-8')
-    if key in ('assets', 'templates', 'app'):
+    if key in ('assets', 'templates', 'credits', 'app'):
         content = content.replace('</script', '<\\/script')
     html = html.replace(f'/*@@INCLUDE:{key}@@*/', content)
 
