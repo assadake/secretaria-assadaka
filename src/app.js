@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.3.0';
+const APP_VER = '1.4.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -62,6 +62,7 @@ const DEFAULT_DB = {
   companies: DEFAULT_COMPANIES,
   employees:[],
   letters:[],
+  credits:[],
   counter:{},
 };
 
@@ -94,6 +95,7 @@ function loadDB(){
     db.companies.forEach(c=>{ if(c.layout===undefined) c.layout = c.id==='ais' ? 'ais':'aisbm'; });
     db.employees = db.employees||[]; db.letters = db.letters||[]; db.counter = db.counter||{};
     ensureStationeriesOn(db);
+    if(typeof crEnsure === 'function') crEnsure(db);
     return db;
   }catch(e){
     console.warn('التخزين غير متاح (وضع المعاينة)', e);
@@ -390,11 +392,13 @@ const ROUTES = {
   dash:{title:'لوحة التحكم', sub:'نظرة عامة على المراسلات والأرشيف'},
   new:{title:'خطاب جديد', sub:'اختر النموذج، املأ البيانات، ثم أرشِف أو اطبع'},
   archive:{title:'الأرشيف', sub:'البحث والرجوع إلى الخطابات الصادرة'},
+  credits:{title:'الاعتمادات البنكية', sub:'ملفات الاعتماد: المستندات، سير الإجراءات، المتابعة والأرشفة'},
   employees:{title:'الموظفون', sub:'قائمة الموظفين لتعبئة الخطابات تلقائياً'},
   companies:{title:'الشركات', sub:'بيانات الشركات والترويسة والتوقيع'},
   settings:{title:'الإعدادات والنسخ الاحتياطي', sub:'التفضيلات، التصدير والاستيراد'},
 };
 let currentRoute = 'dash';
+let creditOpenId = '';      // ملف الاعتماد المفتوح حالياً (إن وُجد)
 let composerState = { tplId:null, values:{}, editingId:null, ref:null };
 
 function freshComposer(tplId){
@@ -437,6 +441,11 @@ function render(route){
   if(name==='dash') box.innerHTML = viewDash();
   else if(name==='new') box.innerHTML = viewComposer();
   else if(name==='archive') box.innerHTML = viewArchive();
+  else if(name==='credits'){
+    const cid = String(route||currentRoute).split('/')[1] || '';
+    if(cid){ creditOpenId = cid; box.innerHTML = viewCredit(cid); }
+    else { creditOpenId = ''; box.innerHTML = viewCredits(); }
+  }
   else if(name==='employees') box.innerHTML = viewEmployees();
   else if(name==='companies') box.innerHTML = viewCompanies();
   else if(name==='settings') box.innerHTML = viewSettings();
@@ -465,6 +474,26 @@ function viewDash(){
     <div class="stat gold"><div class="ico">📅</div><div><div class="v">${thisMonth}</div><div class="l">صادرة هذا الشهر</div></div></div>
     <div class="stat red"><div class="ico">🏢</div><div><div class="v">${DB.companies.length}</div><div class="l">الشركات المُدارة</div></div></div>
   </div>
+
+  ${(()=>{ crEnsure(DB); const all = DB.credits||[]; if(!all.length) return '';
+    const cs = creditStats(all);
+    const attention = all.filter(d=>creditHealth(d).level==='danger' && !['closed','rejected'].includes(d.status)).slice(0,4);
+    return `<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>🏦 الاعتمادات البنكية</h3>
+        <span class="badge blue">${cs.active} ملف جارٍ</span>
+        ${cs.late? `<span class="badge red">${cs.late} يحتاج تدخلاً</span>`:''}
+        <div class="spacer"></div>
+        <button class="btn btn-sm btn-primary" data-go="credits">فتح منطقة الاعتمادات ←</button>
+      </div>
+      ${attention.length? `<div class="small muted mb10">ملفات تحتاج متابعة:</div>
+      ${attention.map(d=>`<div class="flex" style="justify-content:space-between;border-bottom:1px dashed var(--line);padding:7px 0;flex-wrap:wrap">
+        <span><b>${esc(d.customerName||'')}</b> <span class="small muted">${esc(d.ref||'')} · ${esc(d.bank||'')}</span></span>
+        <span class="badge red">${esc(creditHealth(d).label)}</span>
+        <button class="btn btn-sm" data-go="credits">متابعة</button>
+      </div>`).join('')}`
+      : `<div class="small muted">لا توجد ملفات متأخرة — ${cs.closed} ملف مغلق ومؤرشف حتى الآن.</div>`}
+    </div>`;
+  })()}
 
   <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px" class="dash-grid">
     <div class="card pad0">
@@ -919,6 +948,9 @@ function viewSettings(){
 function bindView(name){
   if(name==='new') bindComposer();
   if(name==='archive') bindArchive();
+  if(name==='credits'){
+    if(creditOpenId) bindCreditDetail(creditOpenId); else bindCredits();
+  }
   if(name==='employees') bindEmployees();
   if(name==='companies') bindCompanies();
   if(name==='settings') bindSettings();
@@ -1503,13 +1535,13 @@ function bindSettings(){
       if(API_ON){
         if(!confirm('سيتم استبدال كامل الأرشيف المشترك بمحتوى الملف. متابعة؟')) return;
         const res = await apiFetch('PUT','api/state',{
-          settings: db.settings, companies: db.companies, employees: db.employees, letters: db.letters, counter: db.counter
+          settings: db.settings, companies: db.companies, employees: db.employees, letters: db.letters, credits: db.credits||[], counter: db.counter
         });
         if(res && res.rev) DB_REV = res.rev;
         await reloadState();
         toast('تم استيراد الأرشيف المشترك'); render('settings'); return;
       }
-      DB = db; saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
+      DB = db; crEnsure(DB); saveDB(true); toast('تم الاستيراد بنجاح'); render('settings');
     }catch(e){ toast('ملف غير صالح','err'); } };
     r.readAsText(f);
   };
@@ -1618,10 +1650,11 @@ async function reloadState(keepRoute){
   if(!st || st.__status) return false;
   DB = {
     version:3, settings: st.settings || {}, companies: st.companies || [],
-    employees: st.employees || [], letters: st.letters || [], counter: {},
+    employees: st.employees || [], letters: st.letters || [], credits: st.credits || [], counter: {},
   };
   DB_REV = st.rev || 0;
   ensureStationeries();
+  crEnsure(DB);
   updateSyncBadge();
   if(keepRoute) render(currentRoute);
   return true;
