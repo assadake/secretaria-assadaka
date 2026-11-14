@@ -2,13 +2,15 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.2.0';
+const APP_VER = '1.3.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
    ============================================================ */
 let API_ON = false;            // true = archive partagée via le serveur
 let API_NEEDS_LOGIN = false;   // le serveur exige un mot de passe
+let API_STORAGE = 'local';     // 'postgres' | 'sqlite' | 'local'
+let API_CLOUD = false;         // true = hébergé sur Render / Cloud
 let DB_REV = 0;                // révision serveur (détection de changements)
 let SYNC_TIMER = null;
 let SYNC_PENDING = false;
@@ -21,6 +23,10 @@ async function apiFetch(method, path, body){
     const j = await r.json().catch(()=>({}));
     if(j.needsLogin) API_NEEDS_LOGIN = true;
     return { __status:401, ...j };
+  }
+  if(r.status === 429){
+    const j = await r.json().catch(()=>({}));
+    return { __status:429, ok:false, ...j };
   }
   if(!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
@@ -861,7 +867,13 @@ function viewSettings(){
         <div class="spacer"></div>
         <span class="badge grey">الإصدار ${APP_VER}</span>
       </div>
-      <div class="small muted mb10">كل البيانات محفوظة داخل هذا المتصفح على جهازك (${(size/1024).toFixed(0)} كيلوبايت). صدّر نسخة احتياطية بصفة دورية.</div>
+      <div class="small muted mb10">${
+        API_ON
+          ? (API_STORAGE === 'postgres'
+              ? 'الأرشيف محفوظ في قاعدة بيانات <b>PostgreSQL</b> مشتركة ومحمية. يُنصح بتصدير نسخة احتياطية JSON بصفة دورية.'
+              : 'الأرشيف محفوظ على الخادم المشترك. صدّر نسخة احتياطية بصفة دورية.')
+          : `كل البيانات محفوظة داخل هذا المتصفح على جهازك (${(size/1024).toFixed(0)} كيلوبايت). صدّر نسخة احتياطية بصفة دورية.`
+      }</div>
       <div class="flex flex-wrap">
         <button class="btn btn-primary" data-act="backup">⬇ تصدير نسخة احتياطية (JSON)</button>
         <button class="btn" data-act="restore">⬆ استيراد نسخة احتياطية</button>
@@ -876,7 +888,7 @@ function viewSettings(){
       <div class="small muted mt8">حذف كل البيانات يشمل الأرشيف والموظفين وإعدادات الشركات — ولا يمكن التراجع عنه.</div>
     </div>
 
-    ${API_ON ? `
+    ${(API_ON && !API_CLOUD) ? `
     <div class="card" style="grid-column:1/-1">
       <div class="card-h"><h3>🔄 تحديث التطبيق</h3><div class="spacer"></div>
         <span class="badge blue">الإصدار الحالي ${APP_VER}</span></div>
@@ -1491,7 +1503,7 @@ function bindSettings(){
       if(API_ON){
         if(!confirm('سيتم استبدال كامل الأرشيف المشترك بمحتوى الملف. متابعة؟')) return;
         const res = await apiFetch('PUT','api/state',{
-          settings: db.settings, companies: db.companies, employees: db.employees, letters: db.letters
+          settings: db.settings, companies: db.companies, employees: db.employees, letters: db.letters, counter: db.counter
         });
         if(res && res.rev) DB_REV = res.rev;
         await reloadState();
@@ -1616,10 +1628,16 @@ async function reloadState(keepRoute){
 }
 function updateSyncBadge(){
   const el = $('#syncBadge');
+  const lo = $('#logoutBtn');
+  if(lo){
+    lo.style.display = (API_ON && API_NEEDS_LOGIN) ? 'inline-flex' : 'none';
+    lo.onclick = doLogout;
+  }
   if(!el) return;
   if(API_ON){
     const note = $('#modeNote');
-    if(note) note.innerHTML = 'وضع مشترك — الأرشيف على الخادم المركزي<br><span style="opacity:.75">كل الأجهزة ترى نفس الخطابات</span>';
+    const dbLabel = API_STORAGE === 'postgres' ? 'قاعدة بيانات سحابية PostgreSQL' : 'الخادم المركزي';
+    if(note) note.innerHTML = `وضع مشترك — الأرشيف على ${dbLabel}<br><span style="opacity:.75">كل الأجهزة ترى نفس الخطابات</span>`;
     el.className = 'badge ' + (SYNC_PENDING ? 'gold' : 'green');
     el.innerHTML = SYNC_PENDING ? '⟳ تحديثات جديدة — اضغط للتحديث' : '● أرشيف مشترك — متصل';
     el.style.cursor = 'pointer';
@@ -1631,6 +1649,11 @@ function updateSyncBadge(){
     el.textContent = 'محلي (هذا المتصفح)';
     el.onclick = null;
   }
+}
+async function doLogout(){
+  try{ await apiFetch('POST','api/logout',{}); }catch(e){}
+  if(SYNC_TIMER){ clearInterval(SYNC_TIMER); SYNC_TIMER = null; }
+  showLoginOverlay('تم تسجيل الخروج — أدخل كلمة المرور للمتابعة');
 }
 function startSyncPolling(){
   if(!API_ON || SYNC_TIMER) return;
@@ -1666,23 +1689,28 @@ function showLoginOverlay(message){
       <div class="field"><label>كلمة المرور</label>
         <input type="password" id="loginPw" autocomplete="current-password" placeholder="••••••••">
       </div>
-      <div class="small muted mt8">تُحدَّد كلمة المرور في ملف <b>config.json</b> على جهاز الخادم.</div>
+      <div class="small muted mt8">أدخل كلمة المرور المخصّصة للوصول إلى الأرشيف المشترك.</div>
     </div>
     <div class="modal-f"><button class="btn btn-primary" id="loginGo">دخول</button></div>
   </div>`;
   bg.classList.add('open');
   const go = async ()=>{
     const pw = $('#loginPw').value;
-    const res = await apiFetch('POST','api/login',{password:pw});
-    if(res && res.ok){
-      bg.classList.remove('open');
-      API_NEEDS_LOGIN = true;
-      await reloadState();
-      startSyncPolling();
-      render(currentRoute);
-      toast('تم الدخول إلى الأرشيف المشترك');
-    }else{
-      toast('كلمة المرور غير صحيحة','err');
+    try{
+      const res = await apiFetch('POST','api/login',{password:pw});
+      if(res && res.ok){
+        bg.classList.remove('open');
+        API_NEEDS_LOGIN = true;
+        await reloadState();
+        startSyncPolling();
+        updateSyncBadge();
+        render(currentRoute);
+        toast('تم الدخول إلى الأرشيف المشترك');
+      }else{
+        toast((res && res.error) || 'كلمة المرور غير صحيحة','err');
+      }
+    }catch(e){
+      toast('تعذّر الاتصال بالخادم — حاول مجدداً','err');
     }
   };
   $('#loginGo').onclick = go;
@@ -1727,6 +1755,8 @@ async function boot(){
     if(h && h.ok && h.app === 'secretariat'){
       API_ON = true;
       API_NEEDS_LOGIN = !!h.needsLogin;
+      API_STORAGE = h.storage || 'sqlite';
+      API_CLOUD = !!h.cloud;
       if(API_NEEDS_LOGIN && !h.authed){
         updateSyncBadge();
         render('dash');
