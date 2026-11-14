@@ -71,6 +71,7 @@ function diffYM(fromISO, toISOstr){
 const CATS = [
   {id:'cert',  name:'الشهادات', icon:'🎓', color:'blue'},
   {id:'hr',    name:'الموارد البشرية والإدارية', icon:'🗂️', color:'gold'},
+  {id:'lc',    name:'خطابات الاعتمادات المستندية والمصارف', icon:'🏦', color:'blue'},
   {id:'ext',   name:'المراسلات الخارجية والنماذج الحرة', icon:'✉️', color:'green'},
   {id:'group', name:'وثائق وتعميمات المجموعة المشتركة (AIS • الأبطال)', icon:'🏢', color:'red'},
 ];
@@ -407,6 +408,111 @@ const TEMPLATES = [
     <p class="indent"><b>${esc(v.taskScope || '..........................................................')}</b></p>
     ${v.validUntil? `<p>يسري العمل بهذا التفويض حتى تاريخ <b>${fdate(v.validUntil)}</b>.</p>`:''}
     <p>ونأمل من سيادتكم تقديم التسهيلات اللازمة لإنجاز المهمة المكلف بها، مع خالص الشكر والتقدير.</p>`,
+},
+
+/* ---------- 13) طلب فتح اعتماد مستندي لاستيراد بضائع بالسعر الرسمي ---------- */
+{
+  id:'lc_open_req', cat:'lc', icon:'🏦', code:'LCO', name:'طلب فتح اعتماد مستندي لاستيراد بضائع',
+  desc:'خطاب رسمي للمصرف لفتح اعتماد مستندي غير قابل للإلغاء بالسعر الرسمي المعتمد من مصرف ليبيا المركزي (USD / EUR)',
+  personKey:'bankName',
+  fields:[
+    {k:'bankName', label:'المصرف والفرع', req:true, span:2, ph:'مثال: مصرف الجمهورية — فرع طرابلس الرئيسي'},
+    {k:'accountNo', label:'رقم الحساب الجاري للشركة', req:true, ph:'رقم الحساب أو IBAN'},
+    {k:'cblKey', label:'الرمز المصرفي (CBL Key)', ph:'رمز منظومة مصرف ليبيا المركزي'},
+    {k:'supplierName', label:'الشركة المصدِّرة (المستفيد بالخارج)', req:true, ph:'الاسم الكامل للشركة المصدّرة'},
+    {k:'supplierCountry', label:'بلد المنشأ / التصدير', ph:'مثال: تركيا / إيطاليا / البرازيل'},
+    {k:'goodsDesc', label:'وصف البضاعة المستوردة والكمية', req:true, span:2, ph:'مثال: مواد غذائية (زيت طعام مكرر — 20 حاوية / 400 طن)'},
+    {k:'proformaNo', label:'رقم الفاتورة المبدئية (Proforma)', req:true},
+    {k:'proformaDate', type:'date', label:'تاريخ الفاتورة المبدئية'},
+    {k:'currency', type:'select', label:'عملة الاعتماد', options:['USD','EUR']},
+    {k:'amountFX', type:'number', label:'قيمة الفاتورة بالعملة الأجنبية', req:true},
+    {k:'officialRate', label:'سعر الصرف الرسمي المعتمد (د.ل)', ph:'مثال: 6.3600'},
+    {k:'incoterm', type:'select', label:'شروط التسليم (Incoterm)', options:['CIF','CFR','FOB','CPT','CIP']},
+    {k:'portDischarge', label:'ميناء / منفذ الوصول في ليبيا', ph:'مثال: ميناء طرابلس البحري'},
+    {k:'attach', label:'المرفقات', ph:'فاتورة مبدئية، وثيقة تأمين، شهادة ضريبية وضمانية وتضامنية، رمز CBL'},
+    {k:'date', type:'date', label:'تاريخ الخطاب'},
+  ],
+  subject: (v) => `طلب فتح اعتماد مستندي غير قابل للإلغاء بموجب الفاتورة المبدئية رقم (${v.proformaNo || '...'})`,
+  to: (v) => `<div class="l-to">السادة/ <b>${esc(v.bankName || '.............................')}</b> — المحترمين<div class="small">عناية السيد/ مدير الفرع — قسم الاعتمادات المستندية</div></div>`,
+  body: (v,c) => {
+    const curName = v.currency === 'EUR' ? 'يورو (EUR)' : 'دولار أمريكي (USD)';
+    const lyd = (Number(v.amountFX)>0 && Number(v.officialRate)>0) ? fnum(Math.round(Number(v.amountFX)*Number(v.officialRate)*100)/100) : '';
+    return `
+    <p>تحية طيبة وبعد،،،</p>
+    <p class="indent">يرجى من سيادتكم التكرم باتخاذ الإجراءات اللازمة نحو فتح اعتماد مستندي تجاري غير قابل للإلغاء لصالح شركتنا <b>(${esc(c.company.name)})</b>${v.cblKey? `، الرمز المصرفي بمنظومة مصرف ليبيا المركزي <b>(${esc(v.cblKey)})</b>`:''}، وذلك لشراء واستيراد البضاعة المبينة تفاصيلها أدناه بالسعر الرسمي المعتمد من مصرف ليبيا المركزي:</p>
+    <table style="width:100%;border-collapse:collapse;margin:3.5mm 0 4.5mm;font-size:10.5pt">
+      <tbody>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700;width:25%">المستفيد (الشركة المصدِّرة)</td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;width:30%"><b>${esc(v.supplierName || '................')}</b></td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700;width:20%">بلد المنشأ</td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;width:25%">${esc(v.supplierCountry || '—')}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700">البضاعة والكمية</td>
+          <td colspan="3" style="border:1px solid #8a9bb5;padding:4.5px 8px"><b>${esc(v.goodsDesc || '................')}</b></td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700">الفاتورة المبدئية</td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px">رقم <b>${esc(v.proformaNo || '...')}</b> بتاريخ ${fdate(v.proformaDate,'short')}</td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700">شروط وميناء الوصول</td>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px">${esc(v.incoterm || 'CIF')} — ${esc(v.portDischarge || 'ميناء طرابلس البحري')}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #8a9bb5;padding:4.5px 8px;background:#f2f6fc;font-weight:700">القيمة الإجمالية</td>
+          <td colspan="3" style="border:1px solid #8a9bb5;padding:4.5px 8px"><b>${fnum(v.amountFX)} ${curName}</b>${v.officialRate? ` — بالسعر الرسمي (${esc(v.officialRate)} د.ل)${lyd? ` أي ما يعادل تقريباً <b>${lyd} د.ل</b>`:''}`:''}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="indent">ونفوّض مصرفكم الموقر بخصم كامل قيمة التغطية النقدية للاعتماد المستندي (100%) بالدينار الليبي وفق سعر الصرف الرسمي المعتمد من مصرف ليبيا المركزي بالإضافة إلى العمولات والمصاريف المصرفية المقررة خصماً من حسابنا الجاري رقم <b>(${esc(v.accountNo || '................')})</b> طرفكم، كما نلتزم بتقديم الإقرار الجمركي الأصلي الدال على دخول البضاعة عبر المنافذ الرسمية خلال المهلة القانونية المحددة بضوابط مصرف ليبيا المركزي، ونوافق على نشر بيانات الاعتماد بمنظومة المصرف المركزي.</p>`;
+  },
+},
+
+/* ---------- 14) خطاب استلام مستندات شحن أصلية والتعهد الجمركي ---------- */
+{
+  id:'lc_docs_receipt', cat:'lc', icon:'📑', code:'LCD', name:'استلام مستندات شحن أصلية والتعهد الجمركي',
+  desc:'خطاب للمصرف لتسليم مستندات الشحن الأصلية المتداولة على الاعتماد مع التعهد بتقديم الإقرار الجمركي خلال 60 يوماً',
+  personKey:'bankName',
+  fields:[
+    {k:'bankName', label:'المصرف والفرع', req:true, span:2},
+    {k:'lcNumber', label:'رقم الاعتماد المستندي (L/C No.)', req:true},
+    {k:'blNumber', label:'رقم بوليصة الشحن (B/L)', ph:'اختياري'},
+    {k:'goodsDesc', label:'وصف البضاعة والشحنة', span:2},
+    {k:'portDischarge', label:'ميناء الوصول الجمركي', ph:'مثال: ميناء طرابلس البحري'},
+    {k:'delegateName', label:'اسم المفوَّض باستلام المستندات', ph:'اسم الموظف أو المندوب ورقم إثبات الهوية'},
+    {k:'date', type:'date', label:'تاريخ الخطاب'},
+  ],
+  subject: (v) => `استلام مستندات الشحن الأصلية للاعتماد المستندي رقم (${v.lcNumber || '...'})`,
+  to: (v) => `<div class="l-to">السادة/ <b>${esc(v.bankName || '.............................')}</b> — المحترمين<div class="small">قسم الاعتمادات المستندية</div></div>`,
+  body: (v,c) => `
+    <p>تحية طيبة وبعد،،،</p>
+    <p class="indent">بالإشارة إلى الاعتماد المستندي رقم <b>(${esc(v.lcNumber || '................')})</b> المفتوح طرفكم لصالح شركتنا <b>(${esc(c.company.name)})</b> والخاص بتوريد <b>${esc(v.goodsDesc || 'البضاعة الموردة')}</b>${v.blNumber? ` بموجب بوليصة الشحن رقم <b>(${esc(v.blNumber)})</b>`:''} الواردة إلى <b>${esc(v.portDischarge || 'الميناء الليبي')}</b>.</p>
+    <p class="indent">نأمل من سيادتكم التكرم بتسليم حافظة مستندات الشحن الأصلية الواردة على الاعتماد المذكور (بوليصة الشحن، الفاتورة التجارية المصدقة، قائمة التعبئة، شهادة المنشأ، شهادة التفتيش والشهادات الصحية/الرقابية)${v.delegateName? ` إلى مفوضنا السيد/ <b>${esc(v.delegateName)}</b>`:''} وذلك لاستكمال إجراءات الإفراج الصحي والتخليص الجمركي.</p>
+    <p class="indent">ونتعهد بتقديم أصل الإقرار الجمركي المعتمد والنموذج رقم (18) الدال على دخول البضاعة عبر المنافذ الرسمية إلى مصرفكم الموقر خلال المهلة القانونية المقررة من مصرف ليبيا المركزي (ستين يوماً من تاريخ استلام المستندات).</p>`,
+},
+
+/* ---------- 15) خطاب إحالة الإقرار الجمركي الأصلي وإقفال ملف الاعتماد ---------- */
+{
+  id:'lc_customs_close', cat:'lc', icon:'🛃', code:'LCC', name:'إحالة الإقرار الجمركي الأصلي وإقفال الاعتماد',
+  desc:'خطاب إيداع أصل الإقرار الجمركي والنموذج (18) لدى المصرف وطلب تسوية وإقفال ملف الاعتماد المستندي',
+  personKey:'bankName',
+  fields:[
+    {k:'bankName', label:'المصرف والفرع', req:true, span:2},
+    {k:'lcNumber', label:'رقم الاعتماد المستندي (L/C No.)', req:true},
+    {k:'customsDeclNo', label:'رقم الإقرار الجمركي الأصلي', req:true},
+    {k:'customsDeclDate', type:'date', label:'تاريخ الإقرار الجمركي'},
+    {k:'portDischarge', label:'المركز / المديرية الجمركية', ph:'مثال: جمرك ميناء طرابلس البحري'},
+    {k:'goodsDesc', label:'بيان البضاعة المفرج عنها', span:2},
+    {k:'attach', label:'المرفقات المودعة', ph:'أصل الإقرار الجمركي، النموذج (18)، إذن الإفراج النهائي، إفراج مركز الرقابة'},
+    {k:'date', type:'date', label:'تاريخ الخطاب'},
+  ],
+  subject: (v) => `إحالة الإقرار الجمركي الأصلي وإقفال الاعتماد المستندي رقم (${v.lcNumber || '...'})`,
+  to: (v) => `<div class="l-to">السادة/ <b>${esc(v.bankName || '.............................')}</b> — المحترمين<div class="small">قسم الاعتمادات المستندية والرقابة</div></div>`,
+  body: (v,c) => `
+    <p>تحية طيبة وبعد،،،</p>
+    <p class="indent">إلحاقاً بالاعتماد المستندي رقم <b>(${esc(v.lcNumber || '................')})</b> المفتوح طرفكم لصالح شركتنا <b>(${esc(c.company.name)})</b> لتوريد <b>${esc(v.goodsDesc || 'البضاعة المستوردة')}</b>، وعملاً بالضوابط الصادرة عن مصرف ليبيا المركزي بشأن إثبات دخول السلع الموردة عبر المنافذ الرسمية.</p>
+    <p class="indent">نُحيل إلى سيادتكم رفقة هذا الخطاب <b>أصل الإقرار الجمركي المعتمد رقم (${esc(v.customsDeclNo || '............')})</b> الصادر بتاريخ <b>${fdate(v.customsDeclDate,'short')}</b> عن <b>${esc(v.portDischarge || 'مديرية الجمارك المختصة')}</b> مرفقاً بالنموذج الجمركي رقم (18) ومستندات الإفراج النهائي.</p>
+    <p class="indent">وعليه نأمل من سيادتكم التكرم باستلام المستندات الأصلية المرفقة والتأشير بتسوية وإقفال ملف الاعتماد المستندي المذكور لدى مصرفكم ومنظومة مصرف ليبيا المركزي وإبراء ذمة شركتنا.</p>`,
 },
 ];
 

@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.5.0';
+const APP_VER = '1.6.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -421,7 +421,7 @@ const ROUTES = {
   dash:{title:'لوحة التحكم', sub:'نظرة عامة على المراسلات والأرشيف ومتابعة المجموعة'},
   new:{title:'خطاب جديد', sub:'اختر النموذج، املأ البيانات، ثم أرشِف أو اطبع'},
   archive:{title:'الأرشيف', sub:'البحث والرجوع إلى الخطابات الصادرة'},
-  credits:{title:'الاعتمادات البنكية', sub:'ملفات الاعتماد: المستندات، سير الإجراءات، المتابعة والأرشفة'},
+  credits:{title:'الاعتمادات البنكية', sub:'الاعتمادات المستندية لاستيراد البضائع بالسعر الرسمي لمصرف ليبيا المركزي — القرار موافقة أو رفض كاملاً، التغطية النقدية 100% بالدينار'},
   trackers:{title:'جداول المتابعة اليومية', sub:'متابعة السيارات (AIS • الأبطال)، التراخيص، الإقامات، الشحنات والمراجعات اليومية'},
   group:{title:'وثائق المجموعة المشتركة', sub:'السجلات، العقود، التعميمات واللوائح المشتركة بين شركات مجموعة الصداقة المثالية'},
   employees:{title:'الموظفون', sub:'قائمة الموظفين لتعبئة الخطابات تلقائياً'},
@@ -512,21 +512,21 @@ function viewDash(){
 
   ${(()=>{ crEnsure(DB); const all = DB.credits||[]; if(!all.length) return '';
     const cs = creditStats(all);
-    const attention = all.filter(d=>creditHealth(d).level==='danger' && !['closed','rejected'].includes(d.status)).slice(0,4);
+    const attention = all.filter(d=>creditHealth(d).level==='danger' && d.stage!=='close' && d.decision!=='rejected').slice(0,4);
     return `<div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>🏦 الاعتمادات البنكية</h3>
-        <span class="badge blue">${cs.active} ملف جارٍ</span>
+      <div class="card-h"><h3>🏦 الاعتمادات المستندية لاستيراد البضائع</h3>
+        <span class="badge blue">${cs.active} اعتماد جارٍ</span>
         ${cs.late? `<span class="badge red">${cs.late} يحتاج تدخلاً</span>`:''}
         <div class="spacer"></div>
         <button class="btn btn-sm btn-primary" data-go="credits">فتح منطقة الاعتمادات ←</button>
       </div>
-      ${attention.length? `<div class="small muted mb10">ملفات تحتاج متابعة:</div>
+      ${attention.length? `<div class="small muted mb10">اعتمادات تحتاج متابعة (مهلة جمركي / انتهاء صلاحية):</div>
       ${attention.map(d=>`<div class="flex" style="justify-content:space-between;border-bottom:1px dashed var(--line);padding:7px 0;flex-wrap:wrap">
-        <span><b>${esc(d.customerName||'')}</b> <span class="small muted">${esc(d.ref||'')} · ${esc(d.bank||'')}</span></span>
+        <span><b>${esc(d.supplierName||'المستفيد')}</b> <span class="small muted">${esc(d.goodsDesc||'')} · ${esc(d.currency||'USD')} ${fnum(d.amountFX)}</span></span>
         <span class="badge red">${esc(creditHealth(d).label)}</span>
-        <button class="btn btn-sm" data-go="credits">متابعة</button>
+        <button class="btn btn-sm" data-go="credits/${esc(d.id)}">متابعة ←</button>
       </div>`).join('')}`
-      : `<div class="small muted">لا توجد ملفات متأخرة — ${cs.closed} ملف مغلق ومؤرشف حتى الآن.</div>`}
+      : `<div class="small muted">لا توجد اعتمادات متأخرة — ${cs.approved} مُوافق عليه، ${cs.pending} قيد الدراسة حتى الآن.</div>`}
     </div>`;
   })()}
 
