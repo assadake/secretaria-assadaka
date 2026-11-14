@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نظام المراسلات والأرشفة — السكرتارية</title>
+<style>/*@@INCLUDE:font@@*/</style>
+<style>/*@@INCLUDE:style@@*/</style>
+
+</head>
+<body>
+<svg style="display:none">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 2 7l10 5 10-5-10-5Zm0 7.5L4.5 5.8 12 4l7.5 1.8L12 9.5ZM4 10v5.5l8 4 8-4V10l-8 4-8-4Zm2 2.2 5 2.5v4.3l-5-2.5v-4.3Z"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <img id="brandLogo" alt="">
+      <div>
+        <div class="bt">السكرتارية</div>
+        <div class="bs">المراسلات والأرشفة</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a data-route="dash"><span class="ic">🏠</span> لوحة التحكم</a>
+      <a data-route="new"><span class="ic">📝</span> خطاب جديد</a>
+      <a data-route="archive"><span class="ic">🗄️</span> الأرشيف</a>
+      <a data-route="employees"><span class="ic">👥</span> الموظفون</a>
+      <a data-route="companies"><span class="ic">🏢</span> الشركات</a>
+      <a data-route="settings"><span class="ic">⚙️</span> الإعدادات</a>
+    </nav>
+    <div class="side-foot" id="modeNote">
+      نسخة محلية — البيانات محفوظة على هذا الجهاز<br>
+      <span style="opacity:.75">الصداقة المثالية للأغذية · AIS</span>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">لوحة التحكم</h1>
+        <div class="sub" id="pageSub">نظرة عامة</div>
+      </div>
+      <div class="spacer"></div>
+      <span id="updBadge" class="badge gold no-print" style="display:none;cursor:pointer"></span>
+      <span id="syncBadge" class="badge grey no-print">محلي (هذا المتصفح)</span>
+      <div class="co-switch no-print" title="الشركة النشطة">
+        <span class="lbl">الشركة:</span>
+        <select id="coSwitch"></select>
+      </div>
+      <button class="btn btn-sm no-print" onclick="window.print()">🖨 طباعة الصفحة</button>
+      <button class="btn btn-primary no-print" data-go="new">+ خطاب جديد</button>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<!-- منطقة الطباعة -->
+<div id="printArea"></div>
+
+<!-- نافذة منبثقة -->
+<div class="modal-bg" id="modalBg"></div>
+<div id="toast"></div>
+
+<script>/*@@INCLUDE:assets@@*/</script>
+<script>/*@@INCLUDE:templates@@*/</script>
+<script>/*@@INCLUDE:app@@*/</script>
+<script>
+  // ربط أزرار القائمة الجانبية
+  document.querySelectorAll('.nav a').forEach(a=>{
+    a.addEventListener('click', ()=>go(a.dataset.route));
+  });
+</script>
+</body>
+</html>
