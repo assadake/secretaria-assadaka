@@ -6,3 +6,6 @@ venv/
 data/*.db-wal
 data/*.db-shm
 backups/app/
+.env.*
+!.env.example
+supabase/.temp/

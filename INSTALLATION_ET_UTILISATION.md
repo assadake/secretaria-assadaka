@@ -1,5 +1,7 @@
 # Installation et utilisation — guide pas à pas
 
+> Pour une archive hébergée partagée sur Supabase, avec serveur Render, consultez [`SUPABASE_DEPLOIEMENT.md`](SUPABASE_DEPLOIEMENT.md). Le guide ci-dessous décrit principalement l'installation locale SQLite.
+
 Ce guide couvre les **deux installations possibles**. Choisissez selon votre besoin :
 
 | | **A. Un seul PC** | **B. Plusieurs PC, archive commune** ← votre choix |
