@@ -345,7 +345,7 @@ body.printing #printArea{display:block}
 .upd-zone label.btn{cursor:pointer}
 #updLog .alert{margin:0}
 
-/* ================= Groupe & Tableaux de suivi (AIS + الأبطال) ================= */
+/* ================= Groupe & Tableaux de suivi (AIS) ================= */
 .trk-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
 .trk-tab{
   display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:11px;
@@ -367,7 +367,7 @@ body.printing #printArea{display:block}
 .fpill:hover{background:var(--soft)}
 .fpill.active{background:var(--navy);border-color:var(--navy);color:#fff}
 
-/* En-tête officiel bi-logo AIS + الأبطال */
+/* En-tête officiel de la société (logo + trétise AIS) */
 .dual-header{
   background:#fff;border:1.5px solid #cfd9ea;border-radius:14px 14px 0 0;
   padding:14px 22px 12px;position:relative;overflow:hidden;direction:rtl
