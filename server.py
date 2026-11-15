@@ -3,11 +3,11 @@
 """
 نظام المراسلات — الأرشيف المشترك (PostgreSQL / SQLite)
 Serveur d'archive commune :
-  • Cloud (Render / PostgreSQL) : via la variable d'environnement DATABASE_URL
+  • Cloud (Render / Supabase PostgreSQL) : via la variable d'environnement DATABASE_URL
   • Bureau local (Windows / PC) : via SQLite (data/secretariat.db, sans dépendances externes)
 
 Variables d'environnement supportées (Render) :
-  • DATABASE_URL          : URL de connexion PostgreSQL (ex. Render Postgres)
+  • DATABASE_URL          : URL PostgreSQL (Supabase / Render), conservée comme secret
   • APP_PASSWORD          : mot de passe d'accès à l'archive partagée (recommandé)
   • APP_PASSWORD_HASH     : alternative hachée (pbkdf2_sha256$iterations$salt$hex)
   • SESSION_SECRET        : clé secrète de signature des cookies de session
@@ -216,10 +216,11 @@ def _extract_counters_from_payload(payload):
 
 
 # ============================================================
-#  Base de données PostgreSQL (Render / Cloud)
+#  Base de données PostgreSQL (Supabase / Cloud)
 # ============================================================
 class PostgresStore:
     engine = 'postgres'
+    schema = 'secretariat'
 
     def __init__(self, dsn):
         self.dsn = self._normalize_dsn(dsn)
@@ -232,6 +233,17 @@ class PostgresStore:
     def _normalize_dsn(dsn):
         if dsn.startswith('postgres://'):
             dsn = 'postgresql://' + dsn[len('postgres://'):]
+        # Supabase exige TLS. Ajoute le paramètre seulement s'il n'est pas déjà
+        # fourni (les URLs pooler/direct restent utilisables telles quelles).
+        try:
+            parts = urllib.parse.urlsplit(dsn)
+            if parts.hostname and (parts.hostname.endswith('.supabase.co') or parts.hostname.endswith('.supabase.com')):
+                query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+                if not any(key == 'sslmode' for key, _ in query):
+                    query.append(('sslmode', 'require'))
+                    dsn = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+        except ValueError:
+            pass
         return dsn
 
     @staticmethod
@@ -294,8 +306,9 @@ class PostgresStore:
 
     def seed_if_empty(self):
         def _init(cur):
+            cur.execute("CREATE SCHEMA IF NOT EXISTS secretariat")
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS docs (
+                CREATE TABLE IF NOT EXISTS secretariat.docs (
                     kind TEXT NOT NULL,
                     id TEXT NOT NULL,
                     json TEXT NOT NULL,
@@ -304,45 +317,45 @@ class PostgresStore:
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS counters (
+                CREATE TABLE IF NOT EXISTS secretariat.counters (
                     name TEXT PRIMARY KEY,
                     value BIGINT NOT NULL DEFAULT 0
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS meta (
+                CREATE TABLE IF NOT EXISTS secretariat.meta (
                     k TEXT PRIMARY KEY,
                     v TEXT
                 )
             """)
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS revoked_sessions (
+                CREATE TABLE IF NOT EXISTS secretariat.revoked_sessions (
                     nonce TEXT PRIMARY KEY,
                     exp BIGINT NOT NULL
                 )
             """)
             salt = base64.urlsafe_b64encode(os.urandom(32)).decode('ascii').rstrip('=')
             cur.execute(
-                "INSERT INTO meta(k, v) VALUES ('session_salt', %s) ON CONFLICT (k) DO NOTHING",
+                "INSERT INTO secretariat.meta(k, v) VALUES ('session_salt', %s) ON CONFLICT (k) DO NOTHING",
                 (salt,)
             )
-            cur.execute("SELECT COUNT(*) FROM docs WHERE kind = 'company'")
+            cur.execute("SELECT COUNT(*) FROM secretariat.docs WHERE kind = 'company'")
             count = cur.fetchone()[0]
             if count == 0:
                 now = int(time.time())
                 for c in SEED_COMPANIES:
                     cur.execute(
-                        "INSERT INTO docs(kind, id, json, updated_at) VALUES ('company', %s, %s, %s) "
+                        "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('company', %s, %s, %s) "
                         "ON CONFLICT (kind, id) DO NOTHING",
                         (c['id'], json.dumps(c, ensure_ascii=False), now)
                     )
                 cur.execute(
-                    "INSERT INTO docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s) "
+                    "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s) "
                     "ON CONFLICT (kind, id) DO NOTHING",
                     (json.dumps(SEED_SETTINGS, ensure_ascii=False), now)
                 )
                 cur.execute(
-                    "INSERT INTO meta(k, v) VALUES ('rev', '1') ON CONFLICT (k) DO NOTHING"
+                    "INSERT INTO secretariat.meta(k, v) VALUES ('rev', '1') ON CONFLICT (k) DO NOTHING"
                 )
                 print('[i] Archives PostgreSQL initialisées (2 sociétés).')
         self._run(_init)
@@ -354,8 +367,8 @@ class PostgresStore:
     @staticmethod
     def _bump(cur):
         cur.execute("""
-            INSERT INTO meta(k, v) VALUES ('rev', '1')
-            ON CONFLICT (k) DO UPDATE SET v = (COALESCE(NULLIF(meta.v, '')::BIGINT, 0) + 1)::TEXT
+            INSERT INTO secretariat.meta AS current_meta(k, v) VALUES ('rev', '1')
+            ON CONFLICT (k) DO UPDATE SET v = (COALESCE(NULLIF(current_meta.v, '')::BIGINT, 0) + 1)::TEXT
             RETURNING v
         """)
         row = cur.fetchone()
@@ -363,7 +376,7 @@ class PostgresStore:
 
     def get_meta(self, key, default=''):
         def _op(cur):
-            cur.execute("SELECT v FROM meta WHERE k = %s", (key,))
+            cur.execute("SELECT v FROM secretariat.meta WHERE k = %s", (key,))
             row = cur.fetchone()
             return row[0] if row and row[0] is not None else default
         return self._run(_op)
@@ -371,16 +384,16 @@ class PostgresStore:
     def revoke_nonce(self, nonce, exp):
         def _op(cur):
             now = int(time.time())
-            cur.execute("DELETE FROM revoked_sessions WHERE exp < %s", (now,))
+            cur.execute("DELETE FROM secretariat.revoked_sessions WHERE exp < %s", (now,))
             cur.execute(
-                "INSERT INTO revoked_sessions(nonce, exp) VALUES (%s, %s) ON CONFLICT (nonce) DO NOTHING",
+                "INSERT INTO secretariat.revoked_sessions(nonce, exp) VALUES (%s, %s) ON CONFLICT (nonce) DO NOTHING",
                 (nonce, int(exp))
             )
         self._run(_op)
 
     def is_nonce_revoked(self, nonce):
         def _op(cur):
-            cur.execute("SELECT 1 FROM revoked_sessions WHERE nonce = %s AND exp >= %s", (nonce, int(time.time())))
+            cur.execute("SELECT 1 FROM secretariat.revoked_sessions WHERE nonce = %s AND exp >= %s", (nonce, int(time.time())))
             return cur.fetchone() is not None
         return self._run(_op)
 
@@ -394,17 +407,17 @@ class PostgresStore:
     def state(self):
         def _op(cur):
             out = _empty_state()
-            cur.execute("SELECT kind, id, json FROM docs")
+            cur.execute("SELECT kind, id, json FROM secretariat.docs")
             for kind, doc_id, raw_json in cur.fetchall():
                 data = json.loads(raw_json)
                 if kind == 'setting' and doc_id == 'main':
                     out['settings'].update(data)
                 elif kind in DOC_KIND_MAP:
                     out[DOC_KIND_MAP[kind]].append(data)
-            cur.execute("SELECT name, value FROM counters")
+            cur.execute("SELECT name, value FROM secretariat.counters")
             for name, val in cur.fetchall():
                 out['counter'][name] = int(val)
-            cur.execute("SELECT v FROM meta WHERE k = 'rev'")
+            cur.execute("SELECT v FROM secretariat.meta WHERE k = 'rev'")
             r = cur.fetchone()
             out['rev'] = int(r[0]) if r and r[0] else 0
             return _sort_state(out)
@@ -419,7 +432,7 @@ class PostgresStore:
 
         def _op(cur):
             cur.execute(
-                "INSERT INTO docs(kind, id, json, updated_at) VALUES (%s, %s, %s, %s) "
+                "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (kind, id) DO UPDATE SET json = EXCLUDED.json, updated_at = EXCLUDED.updated_at",
                 (kind, data['id'], json.dumps(data, ensure_ascii=False), int(time.time()))
             )
@@ -429,18 +442,18 @@ class PostgresStore:
 
     def delete(self, kind, doc_id):
         def _op(cur):
-            cur.execute("DELETE FROM docs WHERE kind = %s AND id = %s", (kind, doc_id))
+            cur.execute("DELETE FROM secretariat.docs WHERE kind = %s AND id = %s", (kind, doc_id))
             return self._bump(cur)
         return self._run(_op)
 
     def patch_settings(self, patch):
         def _op(cur):
-            cur.execute("SELECT json FROM docs WHERE kind = 'setting' AND id = 'main' FOR UPDATE")
+            cur.execute("SELECT json FROM secretariat.docs WHERE kind = 'setting' AND id = 'main' FOR UPDATE")
             row = cur.fetchone()
             cur_settings = json.loads(row[0]) if row else dict(SEED_SETTINGS)
             cur_settings.update(patch or {})
             cur.execute(
-                "INSERT INTO docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s) "
+                "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s) "
                 "ON CONFLICT (kind, id) DO UPDATE SET json = EXCLUDED.json, updated_at = EXCLUDED.updated_at",
                 (json.dumps(cur_settings, ensure_ascii=False), int(time.time()))
             )
@@ -452,13 +465,13 @@ class PostgresStore:
         def _op(cur):
             if consume:
                 cur.execute(
-                    "INSERT INTO counters(name, value) VALUES (%s, 1) "
-                    "ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 "
+                    "INSERT INTO secretariat.counters AS current_counter(name, value) VALUES (%s, 1) "
+                    "ON CONFLICT (name) DO UPDATE SET value = current_counter.value + 1 "
                     "RETURNING value",
                     (name,)
                 )
                 return int(cur.fetchone()[0])
-            cur.execute("SELECT value FROM counters WHERE name = %s", (name,))
+            cur.execute("SELECT value FROM secretariat.counters WHERE name = %s", (name,))
             row = cur.fetchone()
             return (int(row[0]) if row else 0) + 1
         return self._run(_op)
@@ -468,27 +481,27 @@ class PostgresStore:
         counters = _extract_counters_from_payload(payload)
 
         def _op(cur):
-            cur.execute("DELETE FROM docs")
-            cur.execute("DELETE FROM counters")
+            cur.execute("DELETE FROM secretariat.docs")
+            cur.execute("DELETE FROM secretariat.counters")
             now = int(time.time())
             for kind, key in DOC_KIND_MAP.items():
                 for item in payload.get(key) or []:
                     item = dict(item)
                     item.setdefault('id', _new_doc_id())
                     cur.execute(
-                        "INSERT INTO docs(kind, id, json, updated_at) VALUES (%s, %s, %s, %s) "
+                        "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES (%s, %s, %s, %s) "
                         "ON CONFLICT (kind, id) DO UPDATE SET json = EXCLUDED.json, updated_at = EXCLUDED.updated_at",
                         (kind, item['id'], json.dumps(item, ensure_ascii=False), now)
                     )
             settings = dict(SEED_SETTINGS)
             settings.update(payload.get('settings') or {})
             cur.execute(
-                "INSERT INTO docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s)",
+                "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s)",
                 (json.dumps(settings, ensure_ascii=False), now)
             )
             for cname, cval in counters.items():
                 cur.execute(
-                    "INSERT INTO counters(name, value) VALUES (%s, %s) "
+                    "INSERT INTO secretariat.counters(name, value) VALUES (%s, %s) "
                     "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
                     (cname, int(cval))
                 )
@@ -497,16 +510,16 @@ class PostgresStore:
 
     def wipe(self):
         def _op(cur):
-            cur.execute("DELETE FROM docs")
-            cur.execute("DELETE FROM counters")
+            cur.execute("DELETE FROM secretariat.docs")
+            cur.execute("DELETE FROM secretariat.counters")
             now = int(time.time())
             for c in SEED_COMPANIES:
                 cur.execute(
-                    "INSERT INTO docs(kind, id, json, updated_at) VALUES ('company', %s, %s, %s)",
+                    "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('company', %s, %s, %s)",
                     (c['id'], json.dumps(c, ensure_ascii=False), now)
                 )
             cur.execute(
-                "INSERT INTO docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s)",
+                "INSERT INTO secretariat.docs(kind, id, json, updated_at) VALUES ('setting', 'main', %s, %s)",
                 (json.dumps(SEED_SETTINGS, ensure_ascii=False), now)
             )
             return self._bump(cur)
@@ -942,6 +955,8 @@ STORE = None
 
 def init_store():
     global STORE
+    if os.environ.get('RENDER') and not DATABASE_URL:
+        raise RuntimeError('DATABASE_URL est obligatoire sur Render : configurez la connexion Supabase.')
     if DATABASE_URL:
         STORE = PostgresStore(DATABASE_URL)
     else:
@@ -1356,7 +1371,7 @@ def main(argv=None):
     print('  نظام المراسلات والسكرتارية — الأرشيف المشترك')
     print('=' * 60)
     if STORE.engine == 'postgres':
-        print('  Moteur de base  : PostgreSQL (persistant — Render / Cloud)')
+        print('  Moteur de base  : PostgreSQL (Supabase / Cloud)')
     else:
         print('  Base de données : %s (SQLite local)' % DB_PATH)
     if auth_required():
@@ -1364,7 +1379,7 @@ def main(argv=None):
     else:
         print('  Mot de passe    : غير مفعّل — الوصول مفتوح!')
         if IS_CLOUD:
-            print('  [!] CONSEIL RENDER : définissez la variable APP_PASSWORD dans Environment !')
+            print('  [!] CONSEIL : définissez APP_PASSWORD dans les variables d’environnement !')
     print('')
     print('  على هذا الجهاز  : http://localhost:%d/' % port)
     if not IS_CLOUD:
