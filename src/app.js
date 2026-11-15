@@ -422,8 +422,8 @@ const ROUTES = {
   new:{title:'خطاب جديد', sub:'اختر النموذج، املأ البيانات، ثم أرشِف أو اطبع'},
   archive:{title:'الأرشيف', sub:'البحث والرجوع إلى الخطابات الصادرة'},
   credits:{title:'الاعتمادات البنكية', sub:'الاعتمادات المستندية لاستيراد البضائع بالسعر الرسمي لمصرف ليبيا المركزي — القرار موافقة أو رفض كاملاً، التغطية النقدية 100% بالدينار'},
-  trackers:{title:'جداول المتابعة اليومية', sub:'متابعة السيارات (AIS • الأبطال)، التراخيص، الإقامات، الشحنات والمراجعات اليومية'},
-  group:{title:'وثائق المجموعة المشتركة', sub:'السجلات، العقود، التعميمات واللوائح المشتركة بين شركات مجموعة الصداقة المثالية'},
+  trackers:{title:'جداول المتابعة اليومية', sub:'متابعة السيارات، التراخيص، الإقامات، الشحنات والمراجعات اليومية بترويسات الشركات'},
+  group:{title:'وثائق الشركات', sub:'أرشيف وثائق كل شركة على حدة: السجلات، العقود، التعميمات واللوائح — تُطبع بحسب شعار الشركة وترويستها'},
   employees:{title:'الموظفون', sub:'قائمة الموظفين لتعبئة الخطابات تلقائياً'},
   companies:{title:'الشركات', sub:'بيانات الشركات والترويسة والتوقيع'},
   settings:{title:'الإعدادات والنسخ الاحتياطي', sub:'التفضيلات، التصدير والاستيراد'},
@@ -1338,7 +1338,7 @@ function renderStationeryModal(co, isEdit){
           <select id="stdLayout">
             <option value="ais" ${d.layout==='ais' || (!d.layout)?'selected':''}>الصداقة المثالية (أغذية — AIS)</option>
             <option value="aisbm" ${d.layout==='aisbm'?'selected':''}>الصداقة المثالية (مواد بناء)</option>
-            <option value="group" ${d.layout==='group'?'selected':''}>ترويسة المجموعة المشتركة (AIS + الأبطال)</option>
+            <option value="group" ${d.layout==='group'?'selected':''}>ترويسة المجموعة المشتركة (AIS)</option>
           </select></div>
         <div class="field"><label>&nbsp;</label>
           <label class="flex" style="gap:8px;font-size:13px;padding-top:9px">
