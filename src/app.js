@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.7.0';
+const APP_VER = '1.8.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -120,19 +120,31 @@ function loadDB(){
 
 /* نماذج خطابات يضيفها المستخدم + قواعد لتعديل العبارات الثابتة دون تعديل البرنامج */
 function customFieldLines(fields){
-  return (fields||[]).filter(f=>f.k!=='date').map(f=>`${f.label||''}${f.req?' *':''}`).join('\n');
+  return (fields||[]).filter(f=>f.k!=='date').map(f=>`${f.label||''}${f.type==='employee'?' [موظف]':''}${f.req?' *':''}`).join('\n');
 }
 function parseCustomFieldLines(raw){
-  return String(raw||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean).map((line,i)=>{
-    const req = /\*\s*$/.test(line);
-    return {k:'f'+(i+1), label:line.replace(/\*\s*$/,'').trim(), type:'text', req};
+  return String(raw||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean).map((source,i)=>{
+    const req = /\*\s*$/.test(source);
+    let line=source.replace(/\*\s*$/,'').trim();
+    const isEmployee=/\s*\[موظف\]\s*$/i.test(line);
+    if(isEmployee) line=line.replace(/\s*\[موظف\]\s*$/i,'').trim();
+    return {k:'f'+(i+1), label:line, type:isEmployee?'employee':'text', req};
   });
 }
-function customInterpolate(text, values, ctx){
+function customInterpolate(text, values, ctx, fields=[]){
   return String(text||'').replace(/\{\{\s*([\w-]+)\s*\}\}/g, (all,key)=>{
     if(key==='company') return ctx.company?.name || '';
     if(key==='companyShort') return ctx.company?.short || '';
     if(key==='date') return fdate(values.date || todayISO(), DB.settings.dateStyle);
+    const employeeToken=key.match(/^(f\d+)_(name|position|department|nationalId|hireDate|phone)$/);
+    const fieldKey=employeeToken ? employeeToken[1] : key;
+    const field=fields.find(f=>f.k===fieldKey && f.type==='employee');
+    if(field){
+      const emp=DB.employees.find(e=>e.id===values[fieldKey]);
+      if(!emp) return '................';
+      const attribute=employeeToken ? employeeToken[2] : 'name';
+      return emp[attribute] || '................';
+    }
     const value=values[key];
     return value===undefined || value===null || value==='' ? '................' : String(value);
   });
@@ -144,10 +156,10 @@ function runtimeCustomTemplate(data){
     id:data.id, cat:CATS.some(c=>c.id===data.cat)?data.cat:'ext', icon:data.icon||'✉️',
     code:data.code||'CUS', name:data.name||'نموذج مخصص', desc:data.desc||'نموذج خطاب مخصص',
     fields, personKey:data.personKey||'', isCustom:true, active:data.active!==false,
-    subject:(v,ctx)=>customInterpolate(data.subjectText||data.name,v,ctx),
-    to:(v,ctx)=>data.toText ? `<div class="l-to">${esc(customInterpolate(data.toText,v,ctx))}</div>` : '',
-    body:(v,ctx)=>String(data.bodyText||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p>${esc(customInterpolate(p,v,ctx)).replace(/\n/g,'<br>')}</p>`).join(''),
-    closing:(v,ctx)=>customInterpolate(data.closingText||'وتفضلوا بقبول فائق الاحترام والتقدير',v,ctx),
+    subject:(v,ctx)=>customInterpolate(data.subjectText||data.name,v,ctx,fields),
+    to:(v,ctx)=>data.toText ? `<div class="l-to">${esc(customInterpolate(data.toText,v,ctx,fields))}</div>` : '',
+    body:(v,ctx)=>String(data.bodyText||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p>${esc(customInterpolate(p,v,ctx,fields)).replace(/\n/g,'<br>')}</p>`).join(''),
+    closing:(v,ctx)=>customInterpolate(data.closingText||'وتفضلوا بقبول فائق الاحترام والتقدير',v,ctx,fields),
   };
 }
 function refreshTemplateRegistry(){
@@ -725,10 +737,10 @@ function fieldHTML(f, val){
   if(f.type==='employee'){
     const list = employeesOf(DB.settings.activeCompany);
     return `<div class="field span2">
-      <label>${f.label}</label>
-      <select data-emp-select>
-        <option value="">— إدخال يدوي —</option>
-        ${list.map(e=>`<option value="${e.id}" ${val===e.id?'selected':''}>${esc(e.name)}${e.position? ' — '+esc(e.position):''}</option>`).join('')}
+      <label>${esc(f.label)}${req}</label>
+      <select name="${esc(f.k)}" data-emp-select="${esc(f.k)}">
+        <option value="">${list.length?'— إدخال يدوي —':'— لا يوجد موظفون مسجلون لهذه الشركة —'}</option>
+        ${list.map(e=>`<option value="${esc(e.id)}" ${val===e.id?'selected':''}>${esc(e.name)}${e.position? ' — '+esc(e.position):''}</option>`).join('')}
       </select>
     </div>`;
   }
@@ -1069,7 +1081,7 @@ function templateEditorModal(templateId){
         <div class="field"><label>وصف مختصر</label><input name="desc" value="${esc(t.desc||'')}"></div>
         <div class="field span2"><label>حقول الإدخال — حقل واحد في كل سطر، أضف * في نهاية الحقل ليكون إلزامياً</label>
           <textarea id="tplFieldLines" name="fieldLines" rows="4" placeholder="اسم الموظف *&#10;رقم الخطاب&#10;الجهة الموجه إليها">${esc(customFieldLines(t.fields))}</textarea>
-          <div class="small muted">سيُضاف تاريخ الخطاب تلقائياً. رموز الحقول التي يمكنك وضعها في النص:</div><div id="tplTokens" class="tokens"></div>
+          <div class="small muted">سيُضاف تاريخ الخطاب تلقائياً. لجعل الحقل قائمة اختيار من الموظفين المسجلين، أضف <code>[موظف]</code> بعد اسمه، مثل «اسم الموظف [موظف] *». رموز الحقول تظهر أدناه:</div><div id="tplTokens" class="tokens"></div>
         </div>
         <div class="field span2"><label>حقل «المعني» في الأرشيف</label><select id="tplPersonKey" name="personKey"></select></div>
         <div class="field span2"><label>سطر الجهة المستلمة (اختياري)</label><textarea name="toText" rows="2" placeholder="السادة/ {{f1}} — المحترمين">${esc(t.toText||'')}</textarea></div>
@@ -1086,7 +1098,7 @@ function templateEditorModal(templateId){
   const fieldLines=$('#tplFieldLines',bg), tokens=$('#tplTokens',bg), personSel=$('#tplPersonKey',bg);
   const refreshTokens=()=>{
     const fields=parseCustomFieldLines(fieldLines.value), selected=personSel.value||t.personKey||'';
-    tokens.innerHTML=fields.length?fields.map(f=>`<code>{{${f.k}}}</code> ${esc(f.label)}${f.req?' *':''}`).join('　'):'<span class="muted">أضف حقلاً لإظهار رمزه</span>';
+    tokens.innerHTML=fields.length?fields.map(f=>`<code>{{${f.k}}}</code> ${esc(f.label)}${f.type==='employee'?' (اسم الموظف)':''}${f.req?' *':''}${f.type==='employee'?`　<code>{{${f.k}_position}}</code> الوظيفة　<code>{{${f.k}_department}}</code> القسم`:''}`).join('　'):'<span class="muted">أضف حقلاً لإظهار رمزه</span>';
     personSel.innerHTML=`<option value="">— لا تحدد —</option>${fields.map(f=>`<option value="${f.k}" ${selected===f.k?'selected':''}>${esc(f.label)}</option>`).join('')}`;
   };
   fieldLines.oninput=refreshTokens; refreshTokens();
@@ -1221,6 +1233,8 @@ function bindComposer(){
           set('employeeName', emp.name); set('position', emp.position);
           set('department', emp.department); set('hireDate', emp.hireDate);
           set('nationalId', emp.nationalId);
+          const selectedField=e.target.dataset.empSelect;
+          if(selectedField && selectedField!=='employee') composerState.values[selectedField]=emp.id;
         }
       }
       updatePreview();
@@ -1262,7 +1276,9 @@ async function saveLetter(status){
   }
   const co = activeCompany();
   const cat = CATS.find(c=>c.id===tpl.cat);
-  const person = tpl.personKey ? (v[tpl.personKey]||'') : '';
+  const personField=tpl.fields.find(f=>f.k===tpl.personKey && f.type==='employee');
+  const selectedPerson=personField ? DB.employees.find(e=>e.id===v[tpl.personKey]) : null;
+  const person=personField ? (selectedPerson?.name||'') : (tpl.personKey ? (v[tpl.personKey]||'') : '');
   const subject = tpl.subject? tpl.subject(v,{company:co}) : '';
 
   if(composerState.editingId){
@@ -1394,6 +1410,25 @@ function employeeModal(emp){
   </div>`;
   bg.classList.add('open');
   $$('[data-close]',bg).forEach(b=>b.onclick=()=>bg.classList.remove('open'));
+  if(isNew){
+    const refreshCompanyImage=key=>{
+      const preview=bg.querySelector(`[data-company-img-preview="${key}"]`);
+      const clear=bg.querySelector(`[data-company-img-clear="${key}"]`);
+      if(preview) preview.innerHTML=companyImages[key]?`<img src="${esc(companyImages[key])}" alt="">`:'<div class="slot-empty">لا توجد صورة</div>';
+      if(clear) clear.disabled=!companyImages[key];
+    };
+    $$('[data-company-image]',bg).forEach(inp=>inp.onchange=async()=>{
+      const file=inp.files[0]; if(!file) return;
+      try{
+        const key=inp.dataset.companyImage, isWM=key==='watermarkImg';
+        companyImages[key]=await readImageFile(file,{maxW:isWM?1400:2200,png:isWM});
+        refreshCompanyImage(key); toast('تم تحميل الصورة');
+      }catch(err){toast(err.message||'تعذّر تحميل الصورة','err');}
+    });
+    $$('[data-company-img-clear]',bg).forEach(btn=>btn.onclick=()=>{
+      companyImages[btn.dataset.companyImgClear]=''; refreshCompanyImage(btn.dataset.companyImgClear);
+    });
+  }
   const stdBtn = $('#coStdBtn',bg);
   if(stdBtn) stdBtn.onclick = ()=>{ bg.classList.remove('open'); render('companies'); };
   $('[data-save]',bg).onclick = async ()=>{
@@ -1633,9 +1668,19 @@ function bindCompanies(){
   });
   const nb = $('[data-co-new]'); if(nb) nb.onclick = ()=>companyModal();
 }
+function companyImageUploadHTML(key,label,hint,value){
+  return `<div class="slot">
+    <div class="slot-h"><b>${esc(label)}</b></div>
+    <div class="slot-prev" data-company-img-preview="${key}">${value?`<img src="${esc(value)}" alt="">`:'<div class="slot-empty">لا توجد صورة</div>'}</div>
+    <div class="slot-actions"><label class="btn btn-sm" style="margin:0">استيراد صورة<input type="file" accept="image/png,image/jpeg,image/webp" data-company-image="${key}" style="display:none"></label>
+      <button type="button" class="btn btn-sm btn-red" data-company-img-clear="${key}" ${value?'':'disabled'}>مسح</button></div>
+    <div class="small muted" style="font-size:10.5px">${esc(hint)}</div>
+  </div>`;
+}
 function companyModal(co){
   const isNew = !co;
   const c = co || {id:'', name:'', short:'', code:'', nameEn:'', address:'', phone:'', web:'', email:'', signTitle:'المدير العام', signName:'', headerImg:'', footerImg:'', watermarkImg:'', useWatermark:true, refLabel:'الرقم', layout:'ais'};
+  const companyImages={headerImg:c.headerImg||'',footerImg:c.footerImg||'',watermarkImg:c.watermarkImg||''};
   const bg = $('#modalBg');
   bg.innerHTML = `<div class="modal">
     <div class="modal-h"><h3>${isNew?'إضافة شركة':'تعديل بيانات الشركة'}</h3><div class="spacer"></div><button class="btn btn-sm" data-close>✕</button></div>
@@ -1650,6 +1695,7 @@ function companyModal(co){
         <div class="field"><label>الموقع الإلكتروني</label><input name="web" value="${esc(c.web)}"></div>
         <div class="field"><label>صفة الموقّع</label><input name="signTitle" value="${esc(c.signTitle)}"></div>
         <div class="field span2"><label>اسم الموقّع (اختياري)</label><input name="signName" value="${esc(c.signName)}"></div>
+        ${isNew? `<div class="field span2"><div class="alert info" style="margin:0">يمكنك استيراد صور الترويسة والتذييل الآن؛ ستظهر تلقائياً في نموذج الشركة الأول، ويمكن تغييرها أو إضافة نماذج أخرى لاحقاً.</div><div class="slots mt8" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">${companyImageUploadHTML('headerImg','الترويسة','صورة أعلى الصفحة — PNG أو JPG',companyImages.headerImg)}${companyImageUploadHTML('footerImg','التذييل','صورة أسفل الصفحة — PNG أو JPG',companyImages.footerImg)}${companyImageUploadHTML('watermarkImg','العلامة المائية','يفضّل PNG شفاف',companyImages.watermarkImg)}</div></div>`:''}
         <div class="field span2">
           <div class="alert info" style="margin:0">
             <div><b>الترويسة والتذييل</b> تُدار من «نماذج الترويسة» في صفحة الشركات (يمكن أن يكون للشركة عدة نماذج،
@@ -1680,7 +1726,7 @@ function companyModal(co){
     data.useWatermark = $('#coForm [name=useWatermark]').checked;
     if(!data.name.trim()){ toast('الاسم مطلوب','err'); return; }
     if(isNew){
-      const nco = {id:uid(), ...c, ...data};
+      const nco = {id:uid(), ...c, ...data, ...companyImages};
       DB.companies.push(nco); await persistDoc('company', nco); toast('تمت إضافة الشركة');
     } else { Object.assign(co, data); await persistDoc('company', co); toast('تم التحديث'); }
     bg.classList.remove('open'); render('companies');

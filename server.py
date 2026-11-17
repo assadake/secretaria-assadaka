@@ -40,7 +40,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, 'config.json')
-APP_VERSION = '1.7.0'
+APP_VERSION = '1.8.0'
 
 # ---- mise à jour de l'application (depuis l'interface locale) ----
 UPDATE_ALLOWED = {'index.html', 'secretariat.html', 'server.py'}
