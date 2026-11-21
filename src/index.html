@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="نظام المراسلات والأرشفة للسكرتارية: خطابات بترويسة الشركات، أرشيف صادر قابل للبحث، اعتمادات مستندية، جداول متابعة ووثائق المجموعة — يعمل بلا إنترنت أو عبر أرشيف مشترك على الشبكة.">
+<meta name="theme-color" content="#12305f">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2312305f'/%3E%3Cpath d='M12 20h40v24a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V20z' fill='%23ffffff'/%3E%3Cpath d='M13 21l19 15 19-15' stroke='%23f0b400' stroke-width='4' fill='none' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
 <title>نظام المراسلات والأرشفة — السكرتارية</title>
 <style>/*@@INCLUDE:font@@*/</style>
 <style>/*@@INCLUDE:style@@*/</style>
@@ -23,16 +27,16 @@
         <div class="bs">المراسلات والأرشفة</div>
       </div>
     </div>
-    <nav class="nav">
-      <a data-route="dash"><span class="ic">🏠</span> لوحة التحكم</a>
-      <a data-route="new"><span class="ic">📝</span> خطاب جديد</a>
-      <a data-route="archive"><span class="ic">🗄️</span> الأرشيف</a>
-      <a data-route="credits"><span class="ic">🏦</span> الاعتمادات المستندية</a>
-      <a data-route="trackers"><span class="ic">📊</span> جداول المتابعة</a>
-      <a data-route="group"><span class="ic">🗂️</span> وثائق المجموعة</a>
-      <a data-route="employees"><span class="ic">👥</span> الموظفون</a>
-      <a data-route="companies"><span class="ic">🏢</span> الشركات</a>
-      <a data-route="settings"><span class="ic">⚙️</span> الإعدادات</a>
+    <nav class="nav" aria-label="التنقل الرئيسي">
+      <button type="button" class="nav-item" data-route="dash" aria-current="page"><span class="ic" aria-hidden="true">🏠</span> لوحة التحكم</button>
+      <button type="button" class="nav-item" data-route="new"><span class="ic" aria-hidden="true">📝</span> خطاب جديد</button>
+      <button type="button" class="nav-item" data-route="archive"><span class="ic" aria-hidden="true">🗄️</span> الأرشيف</button>
+      <button type="button" class="nav-item" data-route="credits"><span class="ic" aria-hidden="true">🏦</span> الاعتمادات المستندية</button>
+      <button type="button" class="nav-item" data-route="trackers"><span class="ic" aria-hidden="true">📊</span> جداول المتابعة</button>
+      <button type="button" class="nav-item" data-route="group"><span class="ic" aria-hidden="true">🗂️</span> وثائق المجموعة</button>
+      <button type="button" class="nav-item" data-route="employees"><span class="ic" aria-hidden="true">👥</span> الموظفون</button>
+      <button type="button" class="nav-item" data-route="companies"><span class="ic" aria-hidden="true">🏢</span> الشركات</button>
+      <button type="button" class="nav-item" data-route="settings"><span class="ic" aria-hidden="true">⚙️</span> الإعدادات</button>
     </nav>
     <div class="side-foot" id="modeNote">
       نسخة محلية — البيانات محفوظة على هذا الجهاز<br>
@@ -58,7 +62,7 @@
       <button class="btn btn-sm no-print" onclick="window.print()">🖨 طباعة الصفحة</button>
       <button class="btn btn-primary no-print" data-go="new">+ خطاب جديد</button>
     </header>
-    <main class="content" id="view"></main>
+    <main class="content" id="view" tabindex="-1"></main>
   </div>
 </div>
 
@@ -76,8 +80,8 @@
 <script>/*@@INCLUDE:app@@*/</script>
 <script>
   // ربط أزرار القائمة الجانبية
-  document.querySelectorAll('.nav a').forEach(a=>{
-    a.addEventListener('click', ()=>go(a.dataset.route));
+  document.querySelectorAll('.nav [data-route]').forEach(btn=>{
+    btn.addEventListener('click', ()=>go(btn.dataset.route));
   });
 </script>
 </body>

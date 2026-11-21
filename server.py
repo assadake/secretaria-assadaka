@@ -29,6 +29,9 @@ import os
 import re
 import shutil
 import socket
+import gzip
+import traceback
+import calendar
 import sqlite3
 import sys
 import threading
@@ -40,7 +43,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, 'config.json')
-APP_VERSION = '1.6.0'
+APP_VERSION = '1.7.0'
 
 # ---- mise à jour de l'application (depuis l'interface locale) ----
 UPDATE_ALLOWED = {'index.html', 'secretariat.html', 'server.py'}
@@ -1007,12 +1010,52 @@ class Handler(SimpleHTTPRequestHandler):
         proto = (self.headers.get('X-Forwarded-Proto') or '').lower()
         return proto == 'https' or bool(os.environ.get('RENDER'))
 
+    # CSP volontairement compatible avec le build 100% inline (script/style) et
+    # les images/polices embarquées en data: — bloque toute ressource externe.
+    CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    )
+
     def _security_headers(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'SAMEORIGIN')
         self.send_header('Referrer-Policy', 'same-origin')
+        self.send_header('Content-Security-Policy', self.CSP)
+        self.send_header('Permissions-Policy',
+                         'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()')
+        if self._is_https():
+            self.send_header('Strict-Transport-Security', 'max-age=31536000')
+
+    def _drain_body(self):
+        """HTTP/1.1 keep-alive : vide le corps de la requête jamais lu (ex. /api/logout),
+        sinon les octets restants seraient interprétés comme la requête suivante (400 parasite)."""
+        if getattr(self, '_body_drained', False):
+            return
+        self._body_drained = True
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            n = 0
+        remaining = max(0, n - getattr(self, '_body_read', 0))
+        if remaining <= 0:
+            return
+        if remaining > 4 * 1024 * 1024:
+            # Corps énorme non consommé : on ferme plutôt que de vider la mémoire/socket
+            self.close_connection = True
+            return
+        try:
+            self.rfile.read(remaining)
+        except Exception:
+            self.close_connection = True
 
     def _json(self, obj, code=200, headers=None):
+        self._drain_body()
         body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -1029,8 +1072,11 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             n = int(self.headers.get('Content-Length') or 0)
             if n <= 0 or n > 25 * 1024 * 1024:
+                if n > 25 * 1024 * 1024:
+                    self.close_connection = True
                 return {}
             raw = self.rfile.read(n)
+            self._body_read = n
             return json.loads(raw.decode('utf-8'))
         except Exception:
             return {}
@@ -1050,33 +1096,63 @@ class Handler(SimpleHTTPRequestHandler):
         return session_valid(self._cookie_token(), STORE)
 
     # ---------- routage ----------
+    def _safe(self, fn, *args):
+        """Un bug serveur ne doit jamais couper la connexion sans réponse."""
+        try:
+            return fn(*args)
+        except BrokenPipeError:
+            return None
+        except Exception:
+            traceback.print_exc()
+            try:
+                return self._json({'error': 'internal server error'}, 500)
+            except Exception:
+                return None
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         qs = urllib.parse.parse_qs(parsed.query)
         if path.startswith('/api/'):
-            return self.api_get(path, qs)
-        return self.serve_static(path)
+            return self._safe(self.api_get, path, qs)
+        return self._safe(self.serve_static, path)
 
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith('/api/'):
             return self._json({'ok': True})
-        return self.serve_static(parsed.path)
+        return self._safe(self.serve_static, parsed.path)
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith('/api/'):
-            return self.api_post(parsed.path)
+            return self._safe(self.api_post, parsed.path)
         return self._json({'error': 'not found'}, 404)
 
     def do_PUT(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith('/api/'):
-            return self.api_put(parsed.path)
+            return self._safe(self.api_put, parsed.path)
         return self._json({'error': 'not found'}, 404)
 
     # ---------- fichiers ----------
+    COMPRESSIBLE_EXTS = {'.html', '.js', '.css', '.json', '.svg', '.xml', '.txt', '.csv', '.map'}
+    _GZIP_CACHE = {}          # (path, mtime_ns, size) -> gzipped bytes
+    _GZIP_CACHE_LOCK = threading.Lock()
+
+    @classmethod
+    def _gzip_cached(cls, full, data, st):
+        key = (full, st.st_mtime_ns, st.st_size)
+        with cls._GZIP_CACHE_LOCK:
+            gz = cls._GZIP_CACHE.get(key)
+            if gz is not None:
+                return gz
+            gz = gzip.compress(data, compresslevel=6)
+            if len(cls._GZIP_CACHE) > 24:
+                cls._GZIP_CACHE.clear()
+            cls._GZIP_CACHE[key] = gz
+            return gz
+
     def serve_static(self, path):
         if path in ('/', ''):
             path = '/index.html'
@@ -1099,18 +1175,56 @@ class Handler(SimpleHTTPRequestHandler):
         ext = os.path.splitext(full)[1].lower()
         ctype = MIME_EXTRA.get(ext) or mimetypes.guess_type(full)[0] or 'application/octet-stream'
         try:
+            st = os.stat(full)
+            etag = 'W/"%x-%x"' % (st.st_mtime_ns, st.st_size)
+            last_mod = time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime(st.st_mtime))
+            cache_ctl = 'no-cache' if ext in ('.html', '.js', '.css') else 'max-age=3600'
+
+            # Revalidation : répond 304 si le navigateur a déjà la bonne version
+            inm = self.headers.get('If-None-Match') or ''
+            ims = self.headers.get('If-Modified-Since') or ''
+            not_modified = (inm and etag in [e.strip() for e in inm.split(',')]) or (
+                not inm and ims and st.st_mtime <= calendar.timegm(time.strptime(ims, '%a, %d %b %Y %H:%M:%S GMT')) + 1
+            ) if (inm or ims) else False
+            if not_modified:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Last-Modified', last_mod)
+                self.send_header('Cache-Control', cache_ctl)
+                self.send_header('Vary', 'Accept-Encoding')
+                self._security_headers()
+                self.end_headers()
+                return
+
             with open(full, 'rb') as f:
                 data = f.read()
-        except OSError:
+        except (OSError, ValueError):
             return self._json({'error': 'read error'}, 500)
+
+        accept_gz = 'gzip' in (self.headers.get('Accept-Encoding') or '').lower()
+        use_gzip = accept_gz and ext in self.COMPRESSIBLE_EXTS and len(data) >= 1024
+        if use_gzip:
+            try:
+                body = self._gzip_cached(full, data, st)
+            except OSError:
+                body = data
+                use_gzip = False
+        else:
+            body = data
+
         self.send_response(200)
         self.send_header('Content-Type', ctype)
-        self.send_header('Content-Length', str(len(data)))
-        self.send_header('Cache-Control', 'no-cache' if ext in ('.html', '.js', '.css') else 'max-age=3600')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', cache_ctl)
+        self.send_header('ETag', etag)
+        self.send_header('Last-Modified', last_mod)
+        self.send_header('Vary', 'Accept-Encoding')
+        if use_gzip:
+            self.send_header('Content-Encoding', 'gzip')
         self._security_headers()
         self.end_headers()
         if self.command != 'HEAD':
-            self.wfile.write(data)
+            self.wfile.write(body)
 
     # ---------- API GET ----------
     def api_get(self, path, qs):
@@ -1126,8 +1240,8 @@ class Handler(SimpleHTTPRequestHandler):
                 'needsLogin': auth_required(),
                 'authed': authed,
                 'rev': STORE.rev() if authed else 0,
-                'appMtime': int(os.path.getmtime(os.path.join(APP_DIR, 'index.html')))
-                            if os.path.exists(os.path.join(APP_DIR, 'index.html')) else 0
+                'appMtime': (int(os.path.getmtime(os.path.join(APP_DIR, 'index.html')))
+                             if (authed and os.path.exists(os.path.join(APP_DIR, 'index.html'))) else 0)
             })
         if not self._authed():
             return self._json({'error': 'auth required', 'needsLogin': True}, 401)
@@ -1235,6 +1349,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.api_restart()
 
         if path == '/api/wipe':
+            data = self._read_json()
+            if (data or {}).get('confirm') != 'DELETE_ALL':
+                return self._json({'error': 'تأكيد مطلوب: أرسل confirm=DELETE_ALL'}, 400)
             return self._json({'ok': True, 'rev': STORE.wipe()})
 
         return self._json({'error': 'not found'}, 404)
@@ -1245,6 +1362,7 @@ class Handler(SimpleHTTPRequestHandler):
         if n <= 0 or n > 60 * 1024 * 1024:
             return self._json({'error': 'حجم الملف غير صالح'}, 400)
         raw = self.rfile.read(n)
+        self._body_read = n
         name = urllib.parse.unquote(self.headers.get('X-Filename') or 'update.zip')
         is_zip = name.lower().endswith('.zip') or raw[:2] == b'PK'
 

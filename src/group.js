@@ -1205,7 +1205,7 @@ function viewGroupDocs() {
 
         <div class="gdoc-foot">
           ${d.fileData ? `<button class="btn btn-sm btn-primary" data-gdoc-file="${esc(d.id)}">👁 عرض / تنزيل المرفق</button>` : ''}
-          ${d.externalUrl ? `<a class="btn btn-sm" href="${esc(d.externalUrl)}" target="_blank" rel="noopener">🔗 فتح الرابط</a>` : ''}
+          ${safeUrl(d.externalUrl) ? `<a class="btn btn-sm" href="${esc(safeUrl(d.externalUrl))}" target="_blank" rel="noopener noreferrer">🔗 فتح الرابط</a>` : ''}
           <button class="btn btn-sm" data-gdoc-print="${esc(d.id)}">🖨 طباعة بشعار الشركة وترويستها</button>
           <div class="spacer"></div>
           <button class="btn btn-sm" data-gdoc-edit="${esc(d.id)}">✎</button>

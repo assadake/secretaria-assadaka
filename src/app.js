@@ -2,7 +2,7 @@
    نظام المراسلات وأرشفة الخطابات — السكرتارية
    ============================================================ */
 const STORE_KEY = 'sirr_secretariat_v2';
-const APP_VER = '1.6.0';
+const APP_VER = '1.7.0';
 
 /* ============================================================
    وضع التشغيل: خادم مشترك (API) أو ملف محلي (localStorage)
@@ -464,10 +464,15 @@ function renderCompanySwitch(){
 function render(route){
   const name = String(route||currentRoute).split('/')[0];
   renderCompanySwitch();
-  $$('.nav a').forEach(a=>a.classList.toggle('active', a.dataset.route===name));
+  $$('.nav [data-route]').forEach(a=>{
+    const on = a.dataset.route===name;
+    a.classList.toggle('active', on);
+    if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current');
+  });
   const meta = ROUTES[name] || ROUTES.dash;
   $('#pageTitle').textContent = meta.title;
   $('#pageSub').textContent = meta.sub;
+  document.title = meta.title + ' — السكرتارية';
   const box = $('#view');
   if(name==='dash') box.innerHTML = viewDash();
   else if(name==='new') box.innerHTML = viewComposer();
@@ -1188,7 +1193,8 @@ function exportCSV(){
     l.ref, l.tplName, l.tplCatName||'', l.person||'', l.subject||'', l.companyShort||'',
     toISO(l.createdAt), l.status==='archived'?'مؤرشف':'مسودة'
   ]);
-  const csv = '\uFEFF' + [head, ...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const csvCell = c => { let s = String(c ?? ''); if(/^[=+\-@\t]/.test(s)) s = "'" + s; return `"${s.replace(/"/g,'""')}"`; };
+  const csv = '\uFEFF' + [head, ...rows].map(r=>r.map(csvCell).join(',')).join('\r\n');
   download(new Blob([csv],{type:'text/csv;charset=utf-8'}), 'سجل_الخطابات.csv');
 }
 
@@ -1599,7 +1605,7 @@ function bindSettings(){
     if(!confirm('سيتم حذف كل البيانات نهائياً. متابعة؟')) return;
     if(API_ON){
       if(!confirm('تحذير: هذا يحذف أرشيف جميع المستخدمين على الخادم. متابعة؟')) return;
-      await apiFetch('POST','api/wipe',{});
+      await apiFetch('POST','api/wipe',{confirm:'DELETE_ALL'});
       await reloadState();
     } else {
       DB = structuredClone(DEFAULT_DB); saveDB(true);

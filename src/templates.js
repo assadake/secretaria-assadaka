@@ -4,6 +4,15 @@
 
 /* ---------- أدوات عامة ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+/* روابط خارجية آمنة: لا يُسمح إلا بـ http/https/mailto — يُبطل javascript: / data: */
+const safeUrl = s => {
+  const raw = String(s ?? '').trim();
+  if(!raw) return '';
+  try{
+    const u = new URL(raw, window.location.href);
+    return ['http:', 'https:', 'mailto:'].includes(u.protocol) ? u.href : '';
+  }catch(e){ return ''; }
+};
 const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
 function toISO(d){ if(!d) return ''; if(typeof d==='string') return d.slice(0,10); const x=new Date(d); return isNaN(x)?'':x.toISOString().slice(0,10); }
