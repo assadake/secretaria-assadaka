@@ -1091,6 +1091,7 @@ function filteredGroupDocs() {
   ensureGroupDefaultsOn(DB);
   const q = groupDocUI.q.trim().toLowerCase();
   return (DB.groupDocs || []).filter(d => {
+    if (d.supplierDelivery) return false;
     if (groupDocUI.cat !== 'all' && d.category !== groupDocUI.cat) return false;
     if (groupDocUI.scope !== 'all') {
       const cid = d.companyId || 'all';
@@ -1110,7 +1111,7 @@ function companyLabel(id) {
 
 function viewGroupDocs() {
   ensureGroupDefaultsOn(DB);
-  const all = DB.groupDocs || [];
+  const all = (DB.groupDocs || []).filter(d => !d.supplierDelivery);
   const list = filteredGroupDocs();
   const expiringCount = all.filter(d => {
     const st = expiryStatus(d.expiryDate).state;
