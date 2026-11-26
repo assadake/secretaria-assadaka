@@ -254,6 +254,7 @@ let trackerUI = {
   activeId: 'trk_fleet',
   q: '',
   expFilter: 'all',     // 'all' | 'alerts' | 'expired'
+  companyFilter: 'all', // aisbm | aisbm_legacy | ais | all
   showBadges: true,
   printColors: false,
 };
@@ -471,10 +472,37 @@ function activeTracker() {
   return t;
 }
 
+const TRACKER_COMPANY_FILTERS=[
+  {id:'aisbm',label:'الصداقة المثالية لاستيراد مواد البناء'},
+  {id:'aisbm_legacy',label:'الصداقة الراقية (الاسم القديم)'},
+  {id:'ais',label:'الصداقة المثالية لصناعة المواد الغذائية (مصنع الأبطال)'},
+  {id:'all',label:'الكل — جدول موحّد'},
+];
+function trackerCompanyFilterForRow(trk,row){
+  const explicit=String(row.__companyFilterId||'');
+  if(TRACKER_COMPANY_FILTERS.some(x=>x.id===explicit)) return explicit;
+  const text=String(row.company||row.location||row.site||'');
+  if(/الصداقة\s+الراقية|الراقية\s+قديما|الراقية\s+قديمًا/i.test(text)) return 'aisbm_legacy';
+  if(/AIS\s*-\s*BM|AIS-BM|مواد\s+البناء|مواد\s+صحية|استيراد\s+مواد/i.test(text)) return 'aisbm';
+  if(/مصنع\s+الأبطال|الأبطال|المواد\s+الغذائية|الأغذية|المشروبات|\bAIS\b/i.test(text)) return 'ais';
+  if(/المجموعة|مشترك|كافة\s+الشركات/i.test(text)) return 'all';
+  // بيانات أسطول النموذج الافتراضي تابعة للأغذية؛ الجداول غير المحددة تبقى مشتركة حتى تصنيف السجل.
+  if(trk?.id==='trk_fleet') return 'ais';
+  return 'all';
+}
+function rowMatchesTrackerCompanyFilter(trk,row){
+  const filter=trackerUI.companyFilter||'all';
+  if(filter==='all') return true;
+  const rowCompany=trackerCompanyFilterForRow(trk,row);
+  if(rowCompany==='all'||rowCompany===filter) return true;
+  // الاسم السابق «الصداقة الراقية» والاسم الحالي لمواد البناء يشيران إلى المجموعة نفسها.
+  return ['aisbm','aisbm_legacy'].includes(filter)&&['aisbm','aisbm_legacy'].includes(rowCompany);
+}
 function filteredTrackerRows(trk) {
   if (!trk) return [];
   const q = trackerUI.q.trim().toLowerCase();
   return (trk.rows || []).filter(r => {
+    if(!rowMatchesTrackerCompanyFilter(trk,r)) return false;
     if (trackerUI.expFilter === 'expired' && rowWorstExpiry(trk, r) !== 'expired') return false;
     if (trackerUI.expFilter === 'alerts') {
       const w = rowWorstExpiry(trk, r);
@@ -510,7 +538,8 @@ function viewTrackers() {
   const trk = activeTracker();
   if (!trk) return `<div class="empty">لا توجد جداول متابعة</div>`;
 
-  const st = trackerStats(trk);
+  const companyRows=(trk.rows||[]).filter(r=>rowMatchesTrackerCompanyFilter(trk,r));
+  const st = trackerStats({...trk,rows:companyRows});
   const rows = filteredTrackerRows(trk);
   const isFleet = trk.id === 'trk_fleet';
 
@@ -762,6 +791,7 @@ function bindTrackers() {
 /* ---------- نافذة إضافة / تعديل سطر في جدول المتابعة ---------- */
 function trackerRowModal(trk, existingRow) {
   const r = existingRow || {};
+  const selectedCompany=existingRow?trackerCompanyFilterForRow(trk,existingRow):(trackerUI.companyFilter!=='all'?trackerUI.companyFilter:(DB.settings.activeCompany==='aisbm'?'aisbm':'ais'));
   const bg = $('#modalBg');
   bg.innerHTML = `
     <div class="modal" style="max-width:640px">
@@ -790,6 +820,12 @@ function trackerRowModal(trk, existingRow) {
               <input type="${inputType}" name="${esc(c.k)}" value="${esc(val)}" ${c.ltr ? 'dir="ltr"' : ''}>
             </div>`;
           }).join('')}
+          <div class="field span2">
+            <label>الشركة / تصنيف السجل</label>
+            <select name="__companyFilterId">
+              ${TRACKER_COMPANY_FILTERS.map(c=>`<option value="${c.id}" ${c.id===selectedCompany?'selected':''}>${esc(c.label)}</option>`).join('')}
+            </select>
+          </div>
           <div class="field span2">
             <label>ملاحظات إضافية (اختياري)</label>
             <input name="__notes" value="${esc(r.__notes || '')}" placeholder="أي تفاصيل داخلية عن هذا السجل…">
@@ -1141,6 +1177,10 @@ function trackerDocForRow(trk,row){
   return (DB.groupDocs||[]).find(d=>!d.supplierDelivery&&((row.groupDocId&&d.id===row.groupDocId)||(d.trackerId===trk.id&&d.trackerRowId===row.id)))||null;
 }
 function companyIdFromTrackerRow(trk,row,fallback='all'){
+  const explicit=String(row.__companyFilterId||'');
+  if(explicit==='aisbm'||explicit==='aisbm_legacy') return 'aisbm';
+  if(explicit==='ais') return 'ais';
+  if(explicit==='all') return 'all';
   const value=String(row.company||row.location||row.site||'');
   if(/AIS\s*-\s*BM|AIS-BM/i.test(value)) return 'aisbm';
   if(/\bAIS\b|الأغذية|المشروبات/i.test(value)&&!/المجموعة المشتركة|مشترك/i.test(value)) return 'ais';
@@ -1162,6 +1202,7 @@ function docToTrackerRow(trk,doc,existingRow){
   (trk.columns||[]).forEach(c=>{if(row[c.k]===undefined)row[c.k]='';});
   Object.entries(map).forEach(([docKey,rowKey])=>{row[rowKey]=String(doc[docKey]||'');});
   row.__notes=String(doc.notes||'');
+  row.__companyFilterId=existingRow?.__companyFilterId==='aisbm_legacy'&&doc.companyId==='aisbm'?'aisbm_legacy':(doc.companyId==='aisbm'?'aisbm':(doc.companyId==='ais'?'ais':'all'));
   const companyCol=(trk.columns||[]).find(c=>c.k==='company');
   if(companyCol?.type==='select'){
     const options=companyCol.options||[];

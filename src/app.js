@@ -551,9 +551,18 @@ function go(route, params){
   }
 }
 
-function renderCompanySwitch(){
+function renderCompanySwitch(routeName=''){
   const sel = $('#coSwitch');
   if(!sel) return;
+  const label=sel.closest('.co-switch')?.querySelector('.lbl');
+  if(routeName==='trackers'){
+    if(label) label.textContent='فلترة الجدول:';
+    const filters=TRACKER_COMPANY_FILTERS.map(c=>[c.id,c.label]);
+    sel.innerHTML=filters.map(([id,title])=>`<option value="${id}" ${id===trackerUI.companyFilter?'selected':''}>${esc(title)}</option>`).join('');
+    sel.onchange=()=>{trackerUI.companyFilter=sel.value;render(currentRoute);};
+    return;
+  }
+  if(label) label.textContent='الشركة:';
   sel.innerHTML = DB.companies.map(c=>`<option value="${c.id}" ${c.id===DB.settings.activeCompany?'selected':''}>${esc(c.short)} — ${esc(c.code)}</option>`).join('');
   sel.onchange = ()=>{
     DB.settings.activeCompany = sel.value; saveDB(true);
@@ -564,7 +573,7 @@ function renderCompanySwitch(){
 }
 function render(route){
   const name = String(route||currentRoute).split('/')[0];
-  renderCompanySwitch();
+  renderCompanySwitch(name);
   $$('.nav a').forEach(a=>a.classList.toggle('active', a.dataset.route===name));
   const meta = ROUTES[name] || ROUTES.dash;
   $('#pageTitle').textContent = meta.title;
