@@ -514,6 +514,42 @@ const TEMPLATES = [
     <p class="indent">نُحيل إلى سيادتكم رفقة هذا الخطاب <b>أصل الإقرار الجمركي المعتمد رقم (${esc(v.customsDeclNo || '............')})</b> الصادر بتاريخ <b>${fdate(v.customsDeclDate,'short')}</b> عن <b>${esc(v.portDischarge || 'مديرية الجمارك المختصة')}</b> مرفقاً بالنموذج الجمركي رقم (18) ومستندات الإفراج النهائي.</p>
     <p class="indent">وعليه نأمل من سيادتكم التكرم باستلام المستندات الأصلية المرفقة والتأشير بتسوية وإقفال ملف الاعتماد المستندي المذكور لدى مصرفكم ومنظومة مصرف ليبيا المركزي وإبراء ذمة شركتنا.</p>`,
 },
+
+/* ---------- نموذج طلب عرض سعر / أمر شراء أولي للمورّد ---------- */
+{
+  id:'supplier_order', cat:'ext', icon:'🛒', code:'POQ', name:'طلب عرض سعر / أمر شراء أولي للمورّد',
+  desc:'إنشاء طلب توريد أو طلب أسعار للمورّد مع جدول بنود قابل للإضافة، الطباعة أو الحفظ PDF.',
+  personKey:'supplierName',
+  fields:[
+    {k:'docType', type:'select', label:'نوع المستند', options:[{value:'preorder',label:'أمر شراء أولي — Preorder Turkuaz'},{value:'rfq',label:'طلب عرض سعر — Request for Quotation'}]},
+    {k:'supplierName', label:'اسم المورد', req:true, span:2, ph:'مثال: TURKUAZ'},
+    {k:'supplierContact', label:'البريد أو جهة الاتصال لدى المورد', span:2},
+    {k:'supplierCountry', label:'بلد المورد', ph:'مثال: تركيا'},
+    {k:'requestedDelivery', type:'date', label:'تاريخ التسليم المطلوب / المتوقع'},
+    {k:'currency', type:'select', label:'العملة', options:['USD','EUR','TRY','LYD']},
+    {k:'notes', label:'ملاحظات إضافية', span:2},
+    {k:'date', type:'date', label:'تاريخ المستند'},
+  ],
+  subject: (v) => `${v.docType==='rfq'?'Request for Quotation':'Preorder Turkuaz'} — ${v.supplierName||'Supplier'}`,
+  to: (v) => `<div class="l-to">To: <b>${esc(v.supplierName||'Supplier')}</b>${v.supplierContact?`<div>${esc(v.supplierContact)}</div>`:''}${v.supplierCountry?`<div>Country: ${esc(v.supplierCountry)}</div>`:''}</div>`,
+  body: (v) => {
+    const rfq=v.docType==='rfq';
+    const rows=(Array.isArray(v.items)?v.items:[]).filter(x=>String(x.code||'').trim()||String(x.description||'').trim()||String(x.quantity||'').trim()||String(x.unitPrice||'').trim());
+    const qtyTotal=rows.reduce((sum,x)=>sum+(Number(x.quantity)||0),0);
+    const hasPrice=rows.some(x=>String(x.unitPrice||'').trim()!==''), grandTotal=rows.reduce((sum,x)=>sum+(Number(x.quantity)||0)*(Number(x.unitPrice)||0),0);
+    const tableRows=rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.code||'')}</td><td>${esc(x.description||'')}</td><td>${esc(x.quantity||'')}</td>${hasPrice?`<td>${x.unitPrice?`${esc(x.unitPrice)} ${esc(v.currency||'USD')}`:'—'}</td><td>${x.unitPrice?`${(Number(x.quantity||0)*Number(x.unitPrice||0)).toLocaleString('en-US')} ${esc(v.currency||'USD')}`:'—'}</td>`:''}</tr>`).join(''):Array.from({length:Math.max(4,Array.isArray(v.items)?v.items.length:0)},(_,i)=>`<tr><td>${i+1}</td><td style="height:9mm">&nbsp;</td><td></td><td></td>${hasPrice?'<td></td><td></td>':''}</tr>`).join('');
+    return `
+      <p>${rfq?'Dear Sir/Madam,':'Dear '+esc(v.supplierName||'Supplier')+','}</p>
+      <p>${rfq?'Please provide your best quotation, availability, and expected delivery dates for the items listed below.':'Kindly find our pre-order below. Please confirm availability and expected delivery dates at your earliest convenience.'}</p>
+      <table class="po-items" style="width:100%;border-collapse:collapse;margin:4mm 0;font-size:9.5pt;line-height:1.35">
+        <thead><tr style="background:#347db6;color:#fff"><th style="border:1px solid #8a9bb5;padding:5px">N°</th><th style="border:1px solid #8a9bb5;padding:5px">Code Turkuaz</th><th style="border:1px solid #8a9bb5;padding:5px">Description (EN)</th><th style="border:1px solid #8a9bb5;padding:5px">Quantity</th>${hasPrice?'<th style="border:1px solid #8a9bb5;padding:5px">Unit price</th><th style="border:1px solid #8a9bb5;padding:5px">Total</th>':''}</tr></thead>
+        <tbody>${tableRows}<tr style="font-weight:700"><td colspan="3" style="border:1px solid #8a9bb5;padding:5px;text-align:right">TOTAL quantities</td><td style="border:1px solid #8a9bb5;padding:5px">${qtyTotal.toLocaleString('en-US')}</td>${hasPrice?`<td style="border:1px solid #8a9bb5;padding:5px"></td><td style="border:1px solid #8a9bb5;padding:5px">${grandTotal.toLocaleString('en-US')} ${esc(v.currency||'USD')}</td>`:''}</tr></tbody>
+      </table>
+      ${v.requestedDelivery?`<p>Requested delivery date: <b>${fdate(v.requestedDelivery,'short')}</b></p>`:''}
+      ${v.notes?`<p>Notes: ${esc(v.notes)}</p>`:''}
+      <p>Please confirm receipt and advise us of the expected delivery schedule.</p>`;
+  },
+},
 ];
 
 const TPL_BY_ID = Object.fromEntries(TEMPLATES.map(t=>[t.id,t]));

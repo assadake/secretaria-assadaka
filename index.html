@@ -1375,6 +1375,42 @@ const TEMPLATES = [
     <p class="indent">نُحيل إلى سيادتكم رفقة هذا الخطاب <b>أصل الإقرار الجمركي المعتمد رقم (${esc(v.customsDeclNo || '............')})</b> الصادر بتاريخ <b>${fdate(v.customsDeclDate,'short')}</b> عن <b>${esc(v.portDischarge || 'مديرية الجمارك المختصة')}</b> مرفقاً بالنموذج الجمركي رقم (18) ومستندات الإفراج النهائي.</p>
     <p class="indent">وعليه نأمل من سيادتكم التكرم باستلام المستندات الأصلية المرفقة والتأشير بتسوية وإقفال ملف الاعتماد المستندي المذكور لدى مصرفكم ومنظومة مصرف ليبيا المركزي وإبراء ذمة شركتنا.</p>`,
 },
+
+/* ---------- نموذج طلب عرض سعر / أمر شراء أولي للمورّد ---------- */
+{
+  id:'supplier_order', cat:'ext', icon:'🛒', code:'POQ', name:'طلب عرض سعر / أمر شراء أولي للمورّد',
+  desc:'إنشاء طلب توريد أو طلب أسعار للمورّد مع جدول بنود قابل للإضافة، الطباعة أو الحفظ PDF.',
+  personKey:'supplierName',
+  fields:[
+    {k:'docType', type:'select', label:'نوع المستند', options:[{value:'preorder',label:'أمر شراء أولي — Preorder Turkuaz'},{value:'rfq',label:'طلب عرض سعر — Request for Quotation'}]},
+    {k:'supplierName', label:'اسم المورد', req:true, span:2, ph:'مثال: TURKUAZ'},
+    {k:'supplierContact', label:'البريد أو جهة الاتصال لدى المورد', span:2},
+    {k:'supplierCountry', label:'بلد المورد', ph:'مثال: تركيا'},
+    {k:'requestedDelivery', type:'date', label:'تاريخ التسليم المطلوب / المتوقع'},
+    {k:'currency', type:'select', label:'العملة', options:['USD','EUR','TRY','LYD']},
+    {k:'notes', label:'ملاحظات إضافية', span:2},
+    {k:'date', type:'date', label:'تاريخ المستند'},
+  ],
+  subject: (v) => `${v.docType==='rfq'?'Request for Quotation':'Preorder Turkuaz'} — ${v.supplierName||'Supplier'}`,
+  to: (v) => `<div class="l-to">To: <b>${esc(v.supplierName||'Supplier')}</b>${v.supplierContact?`<div>${esc(v.supplierContact)}</div>`:''}${v.supplierCountry?`<div>Country: ${esc(v.supplierCountry)}</div>`:''}</div>`,
+  body: (v) => {
+    const rfq=v.docType==='rfq';
+    const rows=(Array.isArray(v.items)?v.items:[]).filter(x=>String(x.code||'').trim()||String(x.description||'').trim()||String(x.quantity||'').trim()||String(x.unitPrice||'').trim());
+    const qtyTotal=rows.reduce((sum,x)=>sum+(Number(x.quantity)||0),0);
+    const hasPrice=rows.some(x=>String(x.unitPrice||'').trim()!==''), grandTotal=rows.reduce((sum,x)=>sum+(Number(x.quantity)||0)*(Number(x.unitPrice)||0),0);
+    const tableRows=rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.code||'')}</td><td>${esc(x.description||'')}</td><td>${esc(x.quantity||'')}</td>${hasPrice?`<td>${x.unitPrice?`${esc(x.unitPrice)} ${esc(v.currency||'USD')}`:'—'}</td><td>${x.unitPrice?`${(Number(x.quantity||0)*Number(x.unitPrice||0)).toLocaleString('en-US')} ${esc(v.currency||'USD')}`:'—'}</td>`:''}</tr>`).join(''):Array.from({length:Math.max(4,Array.isArray(v.items)?v.items.length:0)},(_,i)=>`<tr><td>${i+1}</td><td style="height:9mm">&nbsp;</td><td></td><td></td>${hasPrice?'<td></td><td></td>':''}</tr>`).join('');
+    return `
+      <p>${rfq?'Dear Sir/Madam,':'Dear '+esc(v.supplierName||'Supplier')+','}</p>
+      <p>${rfq?'Please provide your best quotation, availability, and expected delivery dates for the items listed below.':'Kindly find our pre-order below. Please confirm availability and expected delivery dates at your earliest convenience.'}</p>
+      <table class="po-items" style="width:100%;border-collapse:collapse;margin:4mm 0;font-size:9.5pt;line-height:1.35">
+        <thead><tr style="background:#347db6;color:#fff"><th style="border:1px solid #8a9bb5;padding:5px">N°</th><th style="border:1px solid #8a9bb5;padding:5px">Code Turkuaz</th><th style="border:1px solid #8a9bb5;padding:5px">Description (EN)</th><th style="border:1px solid #8a9bb5;padding:5px">Quantity</th>${hasPrice?'<th style="border:1px solid #8a9bb5;padding:5px">Unit price</th><th style="border:1px solid #8a9bb5;padding:5px">Total</th>':''}</tr></thead>
+        <tbody>${tableRows}<tr style="font-weight:700"><td colspan="3" style="border:1px solid #8a9bb5;padding:5px;text-align:right">TOTAL quantities</td><td style="border:1px solid #8a9bb5;padding:5px">${qtyTotal.toLocaleString('en-US')}</td>${hasPrice?`<td style="border:1px solid #8a9bb5;padding:5px"></td><td style="border:1px solid #8a9bb5;padding:5px">${grandTotal.toLocaleString('en-US')} ${esc(v.currency||'USD')}</td>`:''}</tr></tbody>
+      </table>
+      ${v.requestedDelivery?`<p>Requested delivery date: <b>${fdate(v.requestedDelivery,'short')}</b></p>`:''}
+      ${v.notes?`<p>Notes: ${esc(v.notes)}</p>`:''}
+      <p>Please confirm receipt and advise us of the expected delivery schedule.</p>`;
+  },
+},
 ];
 
 const TPL_BY_ID = Object.fromEntries(TEMPLATES.map(t=>[t.id,t]));
@@ -4460,6 +4496,10 @@ function openComposer(tplId, record){
     freshComposer(tplId);
   }
 }
+function supplierOrderItemsHTML(items){
+  const rows=(Array.isArray(items)&&items.length?items:[{}]);
+  return `<div class="field span2"><label>بنود طلب الشراء / عرض السعر <span class="req">*</span></label><div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Code Turkuaz</th><th>Description (EN)</th><th>Quantity</th><th>Unit price (اختياري)</th><th></th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="po-item-row"><td>${i+1}</td><td><input data-po-field="code" value="${esc(x.code||'')}" placeholder="VB017..." style="min-width:130px"></td><td><input data-po-field="description" value="${esc(x.description||'')}" placeholder="Item description in English" style="min-width:230px"></td><td><input data-po-field="quantity" type="number" min="0" step="any" value="${esc(x.quantity||'')}" style="width:90px"></td><td><input data-po-field="unitPrice" type="number" min="0" step="any" value="${esc(x.unitPrice||'')}" style="width:110px"></td><td><button type="button" class="btn btn-sm btn-red" data-po-remove="${i}" title="حذف البند">✕</button></td></tr>`).join('')}</tbody></table></div><button type="button" class="btn btn-sm mt8" data-po-add>+ إضافة بند</button><div class="small muted mt8">أدخل رمز الصنف والوصف والكمية؛ السعر اختياري. يمكن حفظ المستند ثم طباعته أو تنزيله PDF.</div></div>`;
+}
 function viewComposer(){
   const tpl = TPL_BY_ID[composerState.tplId] || allTemplates(false)[0];
   if(!composerState.tplId) composerState.tplId = tpl.id;
@@ -4492,12 +4532,14 @@ function viewComposer(){
 
       <form id="letterForm" class="grid2" onsubmit="return false">
         ${tpl.fields.map(f=>fieldHTML(f, v[f.k] ?? '')).join('')}
-        <div class="field span2"><label>المورد المرتبط بالخطاب (اختياري — لتصنيفه في أرشيف الموردين)</label><input name="_archiveSupplier" list="supplierNameOptions" value="${esc(v._archiveSupplier||'')}" placeholder="اختر أو اكتب اسم المورد"><datalist id="supplierNameOptions">${supplierNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div>
+        ${tpl.id==='supplier_order'?supplierOrderItemsHTML(v.items):''}
+        <div class="field span2"><label>المورد المرتبط بالخطاب (اختياري — لتصنيفه في أرشيف الموردين)</label><input name="_archiveSupplier" list="supplierNameOptions" value="${esc(v._archiveSupplier||v.supplierName||'')}" placeholder="اختر أو اكتب اسم المورد"><datalist id="supplierNameOptions">${supplierNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div>
       </form>
 
       <div class="actions">
         <button class="btn btn-primary" data-act="archive">💾 أرشفة الخطاب</button>
         <button class="btn btn-gold" data-act="pdf">🖨️ طباعة / PDF</button>
+        ${tpl.id==='supplier_order'?'<button class="btn btn-gold" data-act="archive-download">💾 حفظ وأرشفة + تحميل PDF</button><button class="btn btn-sm" data-act="blank-model">⬇ تحميل نموذج فارغ PDF</button>':''}
       </div>
       <div class="actions" style="border-top:none;margin-top:8px;padding-top:0">
         <button class="btn btn-sm" data-act="draft">حفظ كمسودة</button>
@@ -4539,7 +4581,7 @@ function fieldHTML(f, val){
   }
   if(f.type==='select'){
     return `<div class="field"><label>${esc(f.label)}${req}</label>
-      <select name="${f.k}">${(f.options||[]).map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select></div>`;
+      <select name="${f.k}">${(f.options||[]).map(o=>{const value=typeof o==='object'?o.value:o,label=typeof o==='object'?o.label:o;return `<option value="${esc(value)}" ${String(value)===String(val)?'selected':''}>${esc(label)}</option>`}).join('')}</select></div>`;
   }
   const type = f.type||'text';
   return `<div class="field ${span}"><label>${esc(f.label)}${req}</label>
@@ -5056,6 +5098,7 @@ function currentValues(){
       if(el.name) v[el.name] = el.value;
       if(el.hasAttribute('data-emp-select')) v._empId = el.value;
     });
+    if(tpl?.id==='supplier_order') v.items=$$('.po-item-row',form).map(row=>Object.fromEntries($$('[data-po-field]',row).map(el=>[el.dataset.poField,el.value])));
   }
   return v;
 }
@@ -5122,10 +5165,20 @@ function bindComposer(){
     composerState = { tplId: el.dataset.tpl, values:{...v, date: v.date||todayISO()}, editingId:null, ref:null };
     render('new');
   });
+  $$('[data-po-add]').forEach(btn=>btn.onclick=()=>{
+    const v=currentValues(); v.items=[...(v.items||[]),{code:'',description:'',quantity:'',unitPrice:''}]; composerState.values=v; render('new');
+  });
+  $$('[data-po-remove]').forEach(btn=>btn.onclick=()=>{
+    const v=currentValues(); if((v.items||[]).length<=1){v.items=[{code:'',description:'',quantity:'',unitPrice:''}];}
+    else v.items.splice(Number(btn.dataset.poRemove),1);
+    composerState.values=v; render('new');
+  });
 
   $$('[data-act]').forEach(btn=>{
     const act = btn.dataset.act;
     if(act==='archive'){ btn.onclick = ()=>saveLetter('archived'); btn.disabled = false; }
+    if(act==='archive-download') btn.onclick=()=>saveLetter('archived',{downloadAfterSave:true});
+    if(act==='blank-model') btn.onclick=printBlankSupplierOrder;
     if(act==='draft') btn.onclick = ()=>saveLetter('draft');
     if(act==='pdf') btn.onclick = doPrintCurrent;
     if(act==='reset') btn.onclick = ()=>{
@@ -5135,19 +5188,30 @@ function bindComposer(){
     if(act==='cancel-edit') btn.onclick = ()=>{ freshComposer(); render('new'); };
   });
 }
+function printBlankSupplierOrder(){
+  const tpl=TPL_BY_ID.supplier_order;
+  const values={date:todayISO(),docType:'preorder',supplierName:'',currency:'USD',items:Array.from({length:5},()=>({code:'',description:'',quantity:'',unitPrice:''}))};
+  printHTML(renderSheetHTML(tpl,values,{ref:peekRef(tpl.code)}));
+}
 function doPrintCurrent(){
   const tpl = TPL_BY_ID[composerState.tplId];
   const v = currentValues();
   const ref = composerState.editingId ? composerState.ref : peekRef(tpl.code);
   printHTML(renderSheetHTML(tpl, v, {ref}));
 }
-async function saveLetter(status){
+async function saveLetter(status, options={}){
   const tpl = TPL_BY_ID[composerState.tplId];
   const v = currentValues();
   const required = tpl.fields.filter(f=>f.req && !String(v[f.k]||'').trim());
   if(required.length){
     toast('يجب تعبئة الحقول الإلزامية: ' + required.map(f=>f.label).join('، '), 'err');
     return;
+  }
+  if(tpl.id==='supplier_order'){
+    const items=(v.items||[]).filter(x=>String(x.code||'').trim()||String(x.description||'').trim()||String(x.quantity||'').trim());
+    if(!items.length){toast('أضف بنداً واحداً على الأقل لطلب المورد','err');return;}
+    if(items.some(x=>!String(x.description||'').trim()||!(Number(x.quantity)>0))){toast('أدخل وصفاً وكمية أكبر من صفر لكل بند','err');return;}
+    v.items=items;
   }
   const co = activeCompany();
   const cat = CATS.find(c=>c.id===tpl.cat);
@@ -5161,6 +5225,7 @@ async function saveLetter(status){
     if(rec){
       Object.assign(rec, { values:{...v}, status, person, subject, supplierName:String(v._archiveSupplier||v.supplierName||'').trim(), updatedAt:Date.now() });
       await persistDoc('letter', rec);
+      if(options.downloadAfterSave) printRecord(rec);
       freshComposer(tpl.id);
       toast('تم تحديث الخطاب ' + rec.ref);
       go('archive');
@@ -5176,6 +5241,7 @@ async function saveLetter(status){
   };
   DB.letters.unshift(rec);
   await persistDoc('letter', rec);
+  if(options.downloadAfterSave) printRecord(rec);
   freshComposer(tpl.id);
   toast(status==='archived' ? `تم الأرشفة برقم ${ref}` : `حُفظت المسودة برقم ${ref}`);
   go('archive');

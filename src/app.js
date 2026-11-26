@@ -696,6 +696,10 @@ function openComposer(tplId, record){
     freshComposer(tplId);
   }
 }
+function supplierOrderItemsHTML(items){
+  const rows=(Array.isArray(items)&&items.length?items:[{}]);
+  return `<div class="field span2"><label>بنود طلب الشراء / عرض السعر <span class="req">*</span></label><div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Code Turkuaz</th><th>Description (EN)</th><th>Quantity</th><th>Unit price (اختياري)</th><th></th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="po-item-row"><td>${i+1}</td><td><input data-po-field="code" value="${esc(x.code||'')}" placeholder="VB017..." style="min-width:130px"></td><td><input data-po-field="description" value="${esc(x.description||'')}" placeholder="Item description in English" style="min-width:230px"></td><td><input data-po-field="quantity" type="number" min="0" step="any" value="${esc(x.quantity||'')}" style="width:90px"></td><td><input data-po-field="unitPrice" type="number" min="0" step="any" value="${esc(x.unitPrice||'')}" style="width:110px"></td><td><button type="button" class="btn btn-sm btn-red" data-po-remove="${i}" title="حذف البند">✕</button></td></tr>`).join('')}</tbody></table></div><button type="button" class="btn btn-sm mt8" data-po-add>+ إضافة بند</button><div class="small muted mt8">أدخل رمز الصنف والوصف والكمية؛ السعر اختياري. يمكن حفظ المستند ثم طباعته أو تنزيله PDF.</div></div>`;
+}
 function viewComposer(){
   const tpl = TPL_BY_ID[composerState.tplId] || allTemplates(false)[0];
   if(!composerState.tplId) composerState.tplId = tpl.id;
@@ -728,12 +732,14 @@ function viewComposer(){
 
       <form id="letterForm" class="grid2" onsubmit="return false">
         ${tpl.fields.map(f=>fieldHTML(f, v[f.k] ?? '')).join('')}
-        <div class="field span2"><label>المورد المرتبط بالخطاب (اختياري — لتصنيفه في أرشيف الموردين)</label><input name="_archiveSupplier" list="supplierNameOptions" value="${esc(v._archiveSupplier||'')}" placeholder="اختر أو اكتب اسم المورد"><datalist id="supplierNameOptions">${supplierNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div>
+        ${tpl.id==='supplier_order'?supplierOrderItemsHTML(v.items):''}
+        <div class="field span2"><label>المورد المرتبط بالخطاب (اختياري — لتصنيفه في أرشيف الموردين)</label><input name="_archiveSupplier" list="supplierNameOptions" value="${esc(v._archiveSupplier||v.supplierName||'')}" placeholder="اختر أو اكتب اسم المورد"><datalist id="supplierNameOptions">${supplierNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist></div>
       </form>
 
       <div class="actions">
         <button class="btn btn-primary" data-act="archive">💾 أرشفة الخطاب</button>
         <button class="btn btn-gold" data-act="pdf">🖨️ طباعة / PDF</button>
+        ${tpl.id==='supplier_order'?'<button class="btn btn-gold" data-act="archive-download">💾 حفظ وأرشفة + تحميل PDF</button><button class="btn btn-sm" data-act="blank-model">⬇ تحميل نموذج فارغ PDF</button>':''}
       </div>
       <div class="actions" style="border-top:none;margin-top:8px;padding-top:0">
         <button class="btn btn-sm" data-act="draft">حفظ كمسودة</button>
@@ -775,7 +781,7 @@ function fieldHTML(f, val){
   }
   if(f.type==='select'){
     return `<div class="field"><label>${esc(f.label)}${req}</label>
-      <select name="${f.k}">${(f.options||[]).map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select></div>`;
+      <select name="${f.k}">${(f.options||[]).map(o=>{const value=typeof o==='object'?o.value:o,label=typeof o==='object'?o.label:o;return `<option value="${esc(value)}" ${String(value)===String(val)?'selected':''}>${esc(label)}</option>`}).join('')}</select></div>`;
   }
   const type = f.type||'text';
   return `<div class="field ${span}"><label>${esc(f.label)}${req}</label>
@@ -1292,6 +1298,7 @@ function currentValues(){
       if(el.name) v[el.name] = el.value;
       if(el.hasAttribute('data-emp-select')) v._empId = el.value;
     });
+    if(tpl?.id==='supplier_order') v.items=$$('.po-item-row',form).map(row=>Object.fromEntries($$('[data-po-field]',row).map(el=>[el.dataset.poField,el.value])));
   }
   return v;
 }
@@ -1358,10 +1365,20 @@ function bindComposer(){
     composerState = { tplId: el.dataset.tpl, values:{...v, date: v.date||todayISO()}, editingId:null, ref:null };
     render('new');
   });
+  $$('[data-po-add]').forEach(btn=>btn.onclick=()=>{
+    const v=currentValues(); v.items=[...(v.items||[]),{code:'',description:'',quantity:'',unitPrice:''}]; composerState.values=v; render('new');
+  });
+  $$('[data-po-remove]').forEach(btn=>btn.onclick=()=>{
+    const v=currentValues(); if((v.items||[]).length<=1){v.items=[{code:'',description:'',quantity:'',unitPrice:''}];}
+    else v.items.splice(Number(btn.dataset.poRemove),1);
+    composerState.values=v; render('new');
+  });
 
   $$('[data-act]').forEach(btn=>{
     const act = btn.dataset.act;
     if(act==='archive'){ btn.onclick = ()=>saveLetter('archived'); btn.disabled = false; }
+    if(act==='archive-download') btn.onclick=()=>saveLetter('archived',{downloadAfterSave:true});
+    if(act==='blank-model') btn.onclick=printBlankSupplierOrder;
     if(act==='draft') btn.onclick = ()=>saveLetter('draft');
     if(act==='pdf') btn.onclick = doPrintCurrent;
     if(act==='reset') btn.onclick = ()=>{
@@ -1371,19 +1388,30 @@ function bindComposer(){
     if(act==='cancel-edit') btn.onclick = ()=>{ freshComposer(); render('new'); };
   });
 }
+function printBlankSupplierOrder(){
+  const tpl=TPL_BY_ID.supplier_order;
+  const values={date:todayISO(),docType:'preorder',supplierName:'',currency:'USD',items:Array.from({length:5},()=>({code:'',description:'',quantity:'',unitPrice:''}))};
+  printHTML(renderSheetHTML(tpl,values,{ref:peekRef(tpl.code)}));
+}
 function doPrintCurrent(){
   const tpl = TPL_BY_ID[composerState.tplId];
   const v = currentValues();
   const ref = composerState.editingId ? composerState.ref : peekRef(tpl.code);
   printHTML(renderSheetHTML(tpl, v, {ref}));
 }
-async function saveLetter(status){
+async function saveLetter(status, options={}){
   const tpl = TPL_BY_ID[composerState.tplId];
   const v = currentValues();
   const required = tpl.fields.filter(f=>f.req && !String(v[f.k]||'').trim());
   if(required.length){
     toast('يجب تعبئة الحقول الإلزامية: ' + required.map(f=>f.label).join('، '), 'err');
     return;
+  }
+  if(tpl.id==='supplier_order'){
+    const items=(v.items||[]).filter(x=>String(x.code||'').trim()||String(x.description||'').trim()||String(x.quantity||'').trim());
+    if(!items.length){toast('أضف بنداً واحداً على الأقل لطلب المورد','err');return;}
+    if(items.some(x=>!String(x.description||'').trim()||!(Number(x.quantity)>0))){toast('أدخل وصفاً وكمية أكبر من صفر لكل بند','err');return;}
+    v.items=items;
   }
   const co = activeCompany();
   const cat = CATS.find(c=>c.id===tpl.cat);
@@ -1397,6 +1425,7 @@ async function saveLetter(status){
     if(rec){
       Object.assign(rec, { values:{...v}, status, person, subject, supplierName:String(v._archiveSupplier||v.supplierName||'').trim(), updatedAt:Date.now() });
       await persistDoc('letter', rec);
+      if(options.downloadAfterSave) printRecord(rec);
       freshComposer(tpl.id);
       toast('تم تحديث الخطاب ' + rec.ref);
       go('archive');
@@ -1412,6 +1441,7 @@ async function saveLetter(status){
   };
   DB.letters.unshift(rec);
   await persistDoc('letter', rec);
+  if(options.downloadAfterSave) printRecord(rec);
   freshComposer(tpl.id);
   toast(status==='archived' ? `تم الأرشفة برقم ${ref}` : `حُفظت المسودة برقم ${ref}`);
   go('archive');
