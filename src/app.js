@@ -740,23 +740,24 @@ function viewComposer(){
         <span class="badge blue">${esc(activeCompany().short)}</span>
       </div>
 
-      <div class="tpl-grid" style="grid-template-columns:1fr 1fr;max-height:210px;overflow:auto;padding:2px">
-        ${CATS.map(cat=>{
-          const ts = allTemplates(false).filter(t=>t.cat===cat.id);
-          return ts.map(t=>`
-            <div class="tpl ${t.id===tpl.id?'active':''}" data-tpl="${esc(t.id)}" title="${esc(t.desc)}">
-              <div class="ti">${esc(t.icon)}</div>
-              <div><div class="tn" style="font-size:12.6px">${esc(t.name)}</div></div>
-            </div>`).join('');
-        }).join('')}
+      <details class="tpl-picker">
+        <summary>تغيير النموذج <span class="small muted">— ${esc(tpl.name)}</span></summary>
+        <div class="tpl-picker-list">${CATS.map(cat=>{
+          const ts=allTemplates(false).filter(t=>t.cat===cat.id); if(!ts.length) return '';
+          return `<section class="tpl-category"><div class="tpl-category-title">${esc(cat.icon)} ${esc(cat.name)}</div><div class="tpl-grid">${ts.map(t=>`
+            <button type="button" class="tpl ${t.id===tpl.id?'active':''}" data-tpl="${esc(t.id)}" title="${esc(t.desc)}">
+              <span class="ti">${esc(t.icon)}</span><span class="tn">${esc(t.name)}</span>
+            </button>`).join('')}</div></section>`;
+        }).join('')}</div>
+      </details>
+
+      <div class="current-template">
+        <div class="current-template-name">${esc(tpl.icon)} ${esc(tpl.name)}</div>
+        <div class="small muted">${esc(tpl.desc)}</div>
+        <span class="badge ${CATS.find(c=>c.id===tpl.cat).color}">${esc(CATS.find(c=>c.id===tpl.cat).name)}</span>
       </div>
 
       <div class="hr"></div>
-      <div class="flex" style="justify-content:space-between;margin-bottom:10px">
-        <div><b>${esc(tpl.icon)} ${esc(tpl.name)}</b><div class="small muted">${esc(tpl.desc)}</div></div>
-        <div class="badge ${CATS.find(c=>c.id===tpl.cat).color}">${esc(CATS.find(c=>c.id===tpl.cat).name)}</div>
-      </div>
-
       <form id="letterForm" class="grid2" onsubmit="return false">
         ${tpl.fields.map(f=>fieldHTML(f, v[f.k] ?? '')).join('')}
         ${tpl.id==='supplier_order'?supplierOrderItemsHTML(v.items):''}
