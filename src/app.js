@@ -389,7 +389,9 @@ function renderSheetHTML(tpl, v, opts={}){
   const co = opts.company || activeCompany();
   const st = DB.settings;
   const ref = opts.ref || '';
-  const dateStr = fdate(v.date || todayISO(), st.dateStyle);
+  const english = tpl.language==='en';
+  const isoDate=toISO(v.date||todayISO());
+  const dateStr = english ? toLatinDigits(isoDate.split('-').reverse().join('/')) : fdate(isoDate, st.dateStyle);
   const std = opts.stationery || activeStationery(co);
   const a = stationeryAssets(co, std);
   const lay = std.layout || co.layout || 'ais';
@@ -398,15 +400,17 @@ function renderSheetHTML(tpl, v, opts={}){
   const refLabel = co.refLabel || 'الرقم';
   const fullpage = !!a.fullpage;
 
-  const metaHTML = isBM
-    ? `<div class="l-meta l-meta-bm">
-         <div class="row"><span class="k">التاريخ :</span><span class="v">${dateStr}</span></div>
-         <div class="row"><span class="k">${esc(refLabel)} :</span><span class="v ref">${esc(ref || '..............................')}</span></div>
-       </div>`
-    : `<div class="l-meta">
-         <div>${esc(cityTxt)}${dateStr}</div>
-         ${ref? `<div class="ref">الرقم: ${esc(ref)}</div>`:''}
-       </div>`;
+  const metaHTML = english
+    ? `<div class="l-meta l-meta-en" dir="ltr" style="display:block;width:100%;text-align:right;direction:ltr"><div><b>Date:</b> ${esc(dateStr)}</div><div class="ref"><b>Ref:</b> ${esc(toLatinDigits(ref || '..............................'))}</div></div>`
+    : isBM
+      ? `<div class="l-meta l-meta-bm">
+           <div class="row"><span class="k">التاريخ :</span><span class="v">${dateStr}</span></div>
+           <div class="row"><span class="k">${esc(refLabel)} :</span><span class="v ref">${esc(ref || '..............................')}</span></div>
+         </div>`
+      : `<div class="l-meta">
+           <div>${esc(cityTxt)}${dateStr}</div>
+           ${ref? `<div class="ref">الرقم: ${esc(ref)}</div>`:''}
+         </div>`;
 
   const contentOverride=templateContentOverride(tpl.id);
   const headSource=contentOverride?.headText
@@ -446,12 +450,13 @@ function renderSheetHTML(tpl, v, opts={}){
         ${metaHTML}
         ${headHTML}
         ${toHTML}
-        ${subj? `<div class="l-subject">الموضوع: ${esc(subj)}</div>`:''}
+        ${subj? `<div class="l-subject">${english?'Subject:':'الموضوع:'} ${esc(subj)}</div>`:''}
         <div class="l-body">${bodyHTML}</div>
         ${(tpl.id==='memo' || tpl.id==='handover_vehicle')? '' : `<p class="mt14">${esc(closing)}</p>`}
         ${attach}
         ${sign}
       </div>`;
+  const printableInner=english?toLatinDigits(inner):inner;
 
   if(fullpage){
     const pt = Number(std.padTop ?? 45), pb = Number(std.padBottom ?? 45);
@@ -459,7 +464,7 @@ function renderSheetHTML(tpl, v, opts={}){
     <div class="sheet first-page sheet-fullpage" data-layout="${esc(lay)}">
       <img class="page-bg" src="${a.fullpage}" alt="">
       <div class="sheet-content" style="padding-top:${pt}mm;padding-bottom:${pb}mm">
-        ${inner}
+        ${printableInner}
       </div>
     </div>`;
   }
@@ -470,7 +475,7 @@ function renderSheetHTML(tpl, v, opts={}){
       ${renderSheetDualBannerHTML()}
       ${wmHTML}
       <div class="sheet-content">
-        ${inner}
+        ${printableInner}
       </div>
       ${std.footerImg ? `<div class="lh-foot"><img src="${a.footer}" alt=""></div>` : renderSheetDualFooterHTML()}
     </div>`;
@@ -481,7 +486,7 @@ function renderSheetHTML(tpl, v, opts={}){
     <div class="lh-head"><img src="${a.header}" alt=""></div>
     ${wmHTML}
     <div class="sheet-content">
-      ${inner}
+      ${printableInner}
     </div>
     <div class="lh-foot"><img src="${a.footer}" alt=""></div>
   </div>`;
@@ -698,7 +703,29 @@ function openComposer(tplId, record){
 }
 function supplierOrderItemsHTML(items){
   const rows=(Array.isArray(items)&&items.length?items:[{}]);
-  return `<div class="field span2"><label>بنود طلب الشراء / عرض السعر <span class="req">*</span></label><div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Code Turkuaz</th><th>Description (EN)</th><th>Quantity</th><th>Unit price (اختياري)</th><th></th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="po-item-row"><td>${i+1}</td><td><input data-po-field="code" value="${esc(x.code||'')}" placeholder="VB017..." style="min-width:130px"></td><td><input data-po-field="description" value="${esc(x.description||'')}" placeholder="Item description in English" style="min-width:230px"></td><td><input data-po-field="quantity" type="number" min="0" step="any" value="${esc(x.quantity||'')}" style="width:90px"></td><td><input data-po-field="unitPrice" type="number" min="0" step="any" value="${esc(x.unitPrice||'')}" style="width:110px"></td><td><button type="button" class="btn btn-sm btn-red" data-po-remove="${i}" title="حذف البند">✕</button></td></tr>`).join('')}</tbody></table></div><button type="button" class="btn btn-sm mt8" data-po-add>+ إضافة بند</button><div class="small muted mt8">أدخل رمز الصنف والوصف والكمية؛ السعر اختياري. يمكن حفظ المستند ثم طباعته أو تنزيله PDF.</div></div>`;
+  return `<div class="field span2"><label>بنود طلب الشراء / عرض السعر <span class="req">*</span></label>
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Supplier Code</th><th>Description (EN)</th><th>Quantity</th><th>Unit price (اختياري)</th><th></th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="po-item-row"><td>${i+1}</td><td><input data-po-field="code" value="${esc(x.code||'')}" placeholder="Supplier SKU / code" style="min-width:130px"></td><td><input data-po-field="description" value="${esc(x.description||'')}" placeholder="Item description in English" style="min-width:230px"></td><td><input data-po-field="quantity" type="number" min="0" step="any" value="${esc(x.quantity||'')}" style="width:90px"></td><td><input data-po-field="unitPrice" type="number" min="0" step="any" value="${esc(x.unitPrice||'')}" style="width:110px"></td><td><button type="button" class="btn btn-sm btn-red" data-po-remove="${i}" title="حذف البند">✕</button></td></tr>`).join('')}</tbody></table></div>
+    <div class="field mt8"><label>إدراج جدول من Word أو Excel</label><textarea id="poTablePaste" rows="3" placeholder="انسخ خلايا الجدول من Word أو Excel ثم الصقها هنا (الكود، الوصف، الكمية، السعر اختيارياً)."></textarea><div class="flex mt8"><button type="button" class="btn btn-sm" data-po-import-table>إدراج الجدول الملصوق</button><label class="btn btn-sm" style="margin:0">استيراد CSV<input id="poTableFile" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" style="display:none"></label><button type="button" class="btn btn-sm" data-po-add>+ إضافة بند يدوياً</button></div></div>
+    <div class="small muted mt8">يمكنك لصق خلايا محددة من Word أو Excel مباشرة؛ أو استيراد جدول CSV. أدخل رمز الصنف والوصف والكمية؛ السعر اختياري.</div></div>`;
+}
+function parseSupplierTableText(text){
+  const lines=String(text||'').split(/\r?\n/).filter(line=>line.trim()); if(!lines.length) return [];
+  const first=lines[0], delimiter=first.includes('\t')?'\t':(first.includes(';')?';':',');
+  const parseLine=line=>{const cells=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(ch===delimiter&&!quoted){cells.push(value.trim());value='';}else value+=ch;}cells.push(value.trim());return cells;};
+  let matrix=lines.map(parseLine),header=matrix[0].map(x=>x.toLowerCase());
+  const hasHeader=header.some(x=>/(code|sku|description|quantity|\bqty\b|price|رمز|كود|وصف|الكمية|السعر)/i.test(x));
+  let map={code:0,description:1,quantity:2,unitPrice:3};
+  if(hasHeader){
+    const find=pattern=>header.findIndex(x=>pattern.test(x));
+    map={code:find(/code|sku|رمز|كود/),description:find(/description|item|product|وصف|الصنف/),quantity:find(/quantity|\bqty\b|الكمية|عدد/),unitPrice:find(/unit.?price|price|السعر/)};
+    matrix=matrix.slice(1);
+  }
+  return matrix.map(c=>({code:c[map.code]||'',description:c[map.description]||'',quantity:toLatinDigits(c[map.quantity]||''),unitPrice:map.unitPrice>=0?toLatinDigits(c[map.unitPrice]||''):''})).filter(x=>x.code||x.description||x.quantity||x.unitPrice);
+}
+function importSupplierTable(text){
+  const items=parseSupplierTableText(text);
+  if(!items.length){toast('لم يتم العثور على صفوف في الجدول','err');return;}
+  const values=currentValues(); values.items=items; composerState.values=values; render('new'); toast(`تم إدراج ${items.length} بنداً`);
 }
 function viewComposer(){
   const tpl = TPL_BY_ID[composerState.tplId] || allTemplates(false)[0];
@@ -1373,6 +1400,12 @@ function bindComposer(){
     else v.items.splice(Number(btn.dataset.poRemove),1);
     composerState.values=v; render('new');
   });
+  const poImport=$('[data-po-import-table]'); if(poImport) poImport.onclick=()=>importSupplierTable($('#poTablePaste')?.value||'');
+  const poFile=$('#poTableFile'); if(poFile) poFile.onchange=()=>{
+    const file=poFile.files?.[0]; if(!file) return;
+    if(file.size>2*1024*1024){toast('حجم ملف CSV يتجاوز 2 ميغابايت','err');poFile.value='';return;}
+    const reader=new FileReader();reader.onload=()=>importSupplierTable(String(reader.result||''));reader.onerror=()=>toast('تعذرت قراءة ملف CSV','err');reader.readAsText(file);
+  };
 
   $$('[data-act]').forEach(btn=>{
     const act = btn.dataset.act;
@@ -1410,7 +1443,7 @@ async function saveLetter(status, options={}){
   if(tpl.id==='supplier_order'){
     const items=(v.items||[]).filter(x=>String(x.code||'').trim()||String(x.description||'').trim()||String(x.quantity||'').trim());
     if(!items.length){toast('أضف بنداً واحداً على الأقل لطلب المورد','err');return;}
-    if(items.some(x=>!String(x.description||'').trim()||!(Number(x.quantity)>0))){toast('أدخل وصفاً وكمية أكبر من صفر لكل بند','err');return;}
+    if(items.some(x=>!String(x.description||'').trim()||!(Number(toLatinDigits(String(x.quantity||'')))>0))){toast('أدخل وصفاً وكمية أكبر من صفر لكل بند','err');return;}
     v.items=items;
   }
   const co = activeCompany();
