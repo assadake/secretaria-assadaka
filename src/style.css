@@ -288,7 +288,7 @@ body.printing #printArea{display:block}
 /* ---------- Company switch (topbar) ---------- */
 .co-switch{display:flex;align-items:center;gap:7px;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:5px 10px}
 .co-switch .lbl{font-size:12px;color:var(--muted);font-weight:700}
-.co-switch select{border:0;background:transparent;font-weight:700;font-size:13px;color:var(--navy);outline:none;cursor:pointer;max-width:230px}
+.co-switch select{border:0;background:transparent;font-weight:700;font-size:13px;color:var(--navy);outline:none;cursor:pointer;max-width:360px}
 @media (max-width:860px){ .co-switch{display:none} }
 
 /* ================= Papeterie : galerie de modèles ================= */
